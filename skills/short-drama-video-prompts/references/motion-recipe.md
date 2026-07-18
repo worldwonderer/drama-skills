@@ -22,6 +22,20 @@ accepted end”。`performance_arc` 也要写具体 receive/process/choice/landi
 删除测试：若一条 structured item 原样复制到下一镜仍成立，它多半没有控制
 任何东西。保留 schema，把值替换成本镜事实，并删掉无关物件/动作枚举。
 
+### 选择性变换边界
+
+**`VID-11 · reviewed_invariant`**：当一段 motion 只让环境或主体的一部分折叠、消失、
+替换、破碎、复原或改变形态时，必须写清：
+
+1. **触发**：哪个 accepted 动作、状态或声音开始变换；
+2. **目标范围**：精确到哪一个人、物、表面、空间构件或局部，沿什么路径变化；
+3. **结束几何/状态**：变换后留下、占据或暴露什么，不只写“消失了”；
+4. **preserve set**：同框但不参与变换的人物、手持道具、文字承载面、空间锚点与
+   continuity 状态保持什么位置和数量。
+
+这是一项语义/可执行性审查，不能靠关键词 validator 证明。若目标模型会把邻近物一起
+吞掉，先缩小目标范围、拆 motion 或增加阶段边界；不要只堆“其他不变”的泛化负面词。
+
 ## 末镜 handoff
 
 **`VID-09 · structural_invariant`**：next-start 要么是已存在的 canonical ref，
@@ -92,6 +106,9 @@ NEXT：next-shot start ref（comparison only）
 ```
 
 “缓缓、自然、电影感”不能替代路径与结果。只描述画面内可见动作；心理词要落为呼吸、注视、肌肉张力、停顿、话语节奏或明确 VO。
+
+若该动作包含选择性变换，按 `VID-11` 把触发、目标范围、结束几何/状态和 preserve set
+写进相应 action stage；不能让相邻非目标人物、道具或已批准文字跟随目标一起改变。
 
 ### 3.3 Performance arc
 
@@ -168,6 +185,7 @@ End report 永远不是下一镜权威输入。不能用 motion 的“更自然�
 - 从不同于 keyframe 的手势/持物开始；
 - prompt 大半重写人物服装场景，动作只剩“自然移动”；
 - 所有动作“同时”，接触/方向/先后不明；
+- 选择性变换只写“消失/变形”，没有目标范围、结束几何或 preserve set；
 - 表演只有“震惊—生气—悲伤”标签，没有触发和可见过程；
 - end 新造了站位、道具转移或下一镜事实；
 - 一条 prompt 内出现多次 editorial cut。

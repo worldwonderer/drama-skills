@@ -15,10 +15,11 @@ pipeline itself.
 
 ## Core ideas
 
-The craft is distilled from large-scale real short-drama production corpora
-(tens of thousands of episode scripts, a hundred thousand storyboards, and
-hundreds of thousands of video-generation tasks, compared across strong and
-mediocre samples). Three sentences run through the whole chain:
+The craft comes from qualitative reading of complete short-drama production
+chains: tracing how a story decision becomes screenplay, asset, storyboard,
+keyframe, and motion-prompt work, and why a revision creates downstream rework.
+The suite does not treat corpus size, frequency, or market statistics as a
+creative answer. Three principles run through the chain:
 
 > 1. **A script is a shooting instruction, not literature** — every line must
 >    answer "what does the camera shoot"; psychology goes to OS, worldbuilding
@@ -113,8 +114,8 @@ Remove any same-named skill links first — do not mix versions. Start from
 # 1. New project
 Use $short-drama to init a vertical 9:16 urban face-slapping short-drama project
 
-# 2. Write episode 1 (golden-three-beat opening, confrontation ladder,
-#    episode-end hook — all checked automatically)
+# 2. Write episode 1 (check character choice, local result, and exact handoff;
+#    do not impose fixed beat or reversal formulas)
 Use $short-drama-write to write EP1: a delivery rider humiliated at a luxury
 hotel turns out to be the group chairman
 
@@ -145,3 +146,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Method References
+
+The screenwriting layer also consulted the public
+[Shanyin Screenwriting Master](https://github.com/Shanyin-ai/shanyin-screenwriting-master)
+for character drive, entry-window, scene-action, and serial-memory concepts. This
+suite re-derives those ideas through its own ownership and production contracts;
+it does not copy upstream example stories or prose templates.

@@ -14,6 +14,7 @@ EXPECTED_JOURNEYS = {
     "JOURNEY-URBAN-001",
     "JOURNEY-FANTASY-001",
     "JOURNEY-DIALOGUE-001",
+    "JOURNEY-SERIAL-001",
 }
 EXPECTED_LAYERS = {
     "story",
@@ -52,7 +53,7 @@ def all_mapping_keys(value: Any) -> set[str]:
 
 
 class FixtureContractTests(unittest.TestCase):
-    def test_three_blind_journeys_are_input_only(self) -> None:
+    def test_blind_journeys_are_input_only(self) -> None:
         documents = json_documents(JOURNEYS)
         self.assertEqual({document["fixture_id"] for _, document in documents}, EXPECTED_JOURNEYS)
         for path, document in documents:

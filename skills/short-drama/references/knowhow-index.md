@@ -18,6 +18,11 @@ questions. The index is navigation, not a formula sheet.
 | STY-08 | craft_default | Translate exposition through consequential behavior, evidence, spatial pressure, or dialogue strategy before adding neutral explanation. |
 | STY-09 | reviewed_invariant | A reveal/reversal grows from established facts and changes a plan, explanation, relationship, or costly choice. |
 | STY-10 | craft_default | Episode 1 states the recurring-payoff promise within the cold open; hook type per episode is planned from the outgoing pressure, not repeated without escalation. |
+| STY-11 | craft_default | Build only the prior-world reservoir needed to predict present choices, then enter where an established strategy begins to create visible cost. |
+| STY-12 | reviewed_invariant | Claimed character progression cites a pressure test, choice or retreat, local result, cost, and changed visible strategy. |
+| STY-13 | reviewed_invariant | Each episode produces a local dramatic result before its outgoing hook; serialization cannot rely only on pausing an unfinished action. |
+| STY-14 | craft_default | Maintain compact serial memory for character strategy/state, relationships, information permissions, setup debt, rhythm, and exact handoff. |
+| STY-15 | reviewed_invariant | Calibrate each information release to what its visible carrier directly supports, while keeping unproved identity, cause, motive, or mechanism explicit as unresolved inference. |
 
 ## Script (`SCR`)
 
@@ -54,6 +59,7 @@ questions. The index is navigation, not a formula sheet.
 | IMG-05 | reviewed_invariant | Prop plates preserve scale, shape, material, wear, function, and text policy. |
 | IMG-06 | structural_invariant | Edit prompts declare exact target, changes, preserve set, and expected continuity impact. |
 | IMG-07 | structural_invariant | Readable text cannot coexist with a global no-text constraint. |
+| IMG-08 | reviewed_invariant | Admit a reference image only after its visible text, glyphs, signage, UI, watermark, and subtitle residue agree with the shot text policy; a negative no-text prompt cannot erase text already carried by a reference. |
 
 ## Shots and keyframes (`SHT`)
 
@@ -69,7 +75,7 @@ questions. The index is navigation, not a formula sheet.
 | SHT-08 | reviewed_invariant | Each authoritative source action is realized once; repeated coverage adds reaction/detail/recontextualization rather than replaying it. |
 | SHT-09 | reviewed_invariant | Exact Location/View orientation and visible anchors match the camera side used by the shot. |
 | SHT-10 | reviewed_invariant | Rendered keyframe prose contains only start-boundary facts, not state first created by the shot motion/end. |
-| SHT-11 | craft_default | After key information lands, budget at least one reaction shot; group shock uses two-level progression instead of repeating one framing. |
+| SHT-11 | craft_default | When information changes another person's power, relationship, knowledge, or choice, preserve that reception visibly; shot count, framing, and duration follow the consequence and project profile. |
 
 ## Video prompts (`VID`)
 
@@ -84,7 +90,8 @@ questions. The index is navigation, not a formula sheet.
 | VID-07 | taste_option | Camera may be locked or moving; audio/lip-sync detail follows the chosen production profile. |
 | VID-08 | reviewed_invariant | Structured motion names this shot's exact actor, action, contact, performance path, and result rather than reusable placeholders. |
 | VID-09 | structural_invariant | Next-start is an existing canonical ref or an explicit provisional locator, never an invented record/hash. |
-| VID-10 | craft_default | Keep one production profile per volume: a consistent global constraint header, dialogue-freeze guard, and negative-list bottom line. |
+| VID-10 | craft_default | Keep one production profile per volume and resolve its text/audio/negative constraints without overriding source coverage or exact-readable obligations. |
+| VID-11 | reviewed_invariant | A selective transform names its trigger, exact target scope, end geometry/state, and preserve set so non-target people, props, text surfaces, and spatial anchors do not change with it. |
 
 ## Continuity (`CON`)
 
@@ -109,3 +116,4 @@ questions. The index is navigation, not a formula sheet.
 | REV-06 | taste_option | Alternatives remain notes unless they violate an accepted creator constraint. |
 | REV-07 | structural_invariant | An end-to-end drafting request cannot impersonate creator acceptance; preview chains remain provisional and undeliverable. |
 | REV-08 | craft_default | Check production-observed defects — text/subtitle residue, music-boundary violations, wardrobe drift, axis breaks, lip-sync mismatch — citing the exact prompt/spec text. |
+| REV-09 | reviewed_invariant | After prompt revision or repackaging, recheck source coverage and every applicable accepted directive; correct asset bindings alone do not prove compliance. |

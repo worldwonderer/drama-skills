@@ -15,7 +15,11 @@
       "/opposition",
       "/causal_escalation",
       "/turn",
+      "/local_dramatic_result",
       "/promised_payoff",
+      "/character_progression",
+      "/information_release",
+      "/rhythm_plan",
       "/outgoing_pressure",
       "/handoff_state",
       "/setup_ids",
@@ -32,6 +36,9 @@
       {
         "scene_id": "SC001",
         "agenda_collision": "__FILL__",
+        "dramatic_result": "__FILL__",
+        "external_pressure": "__LOW_MEDIUM_HIGH_WITH_REASON__",
+        "emotional_load": "__LOW_MEDIUM_HIGH_WITH_REASON__",
         "visible_change": "__FILL__",
         "source_contract_fields": [
           "/objective",

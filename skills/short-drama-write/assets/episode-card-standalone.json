@@ -47,7 +47,43 @@
       "old_plan_that_stops_working": "__FILL__",
       "new_direction": "__FILL__"
     },
+    "local_dramatic_result": {
+      "goal_outcome": "__SUCCESS_FAILURE_OR_REDIRECTION__",
+      "state_change": "__FILL__",
+      "cost_paid": "__FILL__"
+    },
     "promised_payoff": "__FILL__",
+    "character_progression": [
+      {
+        "character_id": "__FILL__",
+        "strategy_before": "__FILL__",
+        "pressure_test": "__FILL__",
+        "choice_or_retreat": "__FILL__",
+        "visible_strategy_after": "__FILL__"
+      }
+    ],
+    "information_release": [
+      {
+        "fact_id": "__FILL__",
+        "audience_before": "__KNOWN_SUSPECTED_OR_UNKNOWN__",
+        "character_permissions_before": {
+          "__CHARACTER_ID__": "__KNOWN_MISTAKEN_OR_UNKNOWN__"
+        },
+        "visible_carrier": "__ACTION_OBJECT_DIALOGUE_OR_CONSEQUENCE__",
+        "supported_claim": "__STRONGEST_CLAIM_DIRECTLY_SUPPORTED_BY_CARRIER__",
+        "unresolved_inference": "__UNPROVED_IDENTITY_CAUSE_MOTIVE_OR_MECHANISM_OR_NONE__",
+        "audience_after": "__KNOWN_SUSPECTED_OR_UNKNOWN__",
+        "character_permissions_after": {
+          "__CHARACTER_ID__": "__KNOWN_MISTAKEN_OR_UNKNOWN__"
+        }
+      }
+    ],
+    "rhythm_plan": {
+      "external_pressure": "__LOW_MEDIUM_HIGH_WITH_REASON__",
+      "emotional_load": "__LOW_MEDIUM_HIGH_WITH_REASON__",
+      "relationship_to_previous": "__CONTINUE_CONTRAST_OR_LAND__",
+      "landing_space": "__WHERE_CONSEQUENCE_IS_PROCESSED_OR_NONE_WITH_REASON__"
+    },
     "outgoing_pressure": {
       "decision_danger_or_question_already_in_motion": "__FILL__",
       "caused_by_this_episode": "__FILL__"

@@ -37,6 +37,12 @@
   write into the next shot?
 - When a reference frame carries appearance/composition, does motion prose avoid
   dumping the full visual bible?
+- Before generation, does every text-bearing reference agree with the accepted
+  text policy? For no-text work, was it necessary to crop, clean, mask, or replace
+  the reference instead of assuming a negative prompt would erase its pixels?
+- For any selective transform, are the accepted trigger, exact target scope,
+  end geometry/state, and preserve set explicit? Do non-target people, props,
+  text surfaces, and spatial anchors keep their required position, count, and state?
 
 Explicit timing sums over duration are structural errors. Untimed overload is a
 reviewed feasibility question: cite which action/performance/story beat would be
@@ -58,6 +64,8 @@ ellipsis, dream, or deliberate disorientation.
 - keyframe contains “first/then/finally”;
 - locked camera also pans or pushes in the same interval;
 - motion invents a grab, injury, transfer, relationship change, or line;
+- a selective transform removes, copies, or reshapes a non-target person, prop,
+  text surface, or spatial anchor because its preserve set was unspecified;
 - end pose/prop state disagrees with next start;
 - every emotional beat uses the same close-up/push template;
 - provider batching is mistaken for editorial shot structure.
@@ -68,6 +76,8 @@ Recurring defects that real short-drama production review guards against; cite
 the exact prompt/spec text when raising them:
 
 - on-screen text or subtitle residue despite a declared no-text constraint;
+- a text-bearing reference admitted under no-text or exact-readable policy
+  without an allowed surface or a crop, clean, mask, or replace decision;
 - background music implied where the audio boundary allows sound effects only;
 - wardrobe or look drift against the bound reference (re-describing clothes the
   reference already fixes invites drift — flag redundant appearance prose);

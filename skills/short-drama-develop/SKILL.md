@@ -48,11 +48,17 @@ description: 将中文短剧想法、梗概、改编材料或已有系列笔记�
 - 哪种人物转变或事实揭开会终结这个引擎；
 - 视觉、声音、场景规模和内容边界。
 
+连续剧、长篇改编或人物纵向变化较重时，再读取
+[serial-character-and-memory.md](references/serial-character-and-memory.md)：先建立只供
+作者决策的前史储备，选择旧策略开始付出代价的叙事切入窗口，再记录人物被捍卫的
+信念、压力测试、信息权限和跨集记忆。不要把前史储备直接倒进首集对白。
+
 ### 4. 把系列运动落到分集
 
 读取 [episode-design.md](references/episode-design.md)，再复制 [episode-map.jsonl](assets/episode-map.jsonl)。每一集记录进入状态、当集追求、阻力、因果升级、方向性转折、已兑现回报、出去的压力以及下一集必须继承的事实。
 
-先保证相邻集能精确交接，再讨论节奏风格。集数、钩子类型、是否反转和高潮位置由创作者与项目决定。
+先保证每集产生局部戏剧结果、相邻集能精确交接，再讨论外部压力/情感负荷的双轨
+节奏。集数、钩子类型、是否反转和高潮位置由创作者与项目决定。
 
 ### 5. 做所有者检查并交接
 
@@ -90,6 +96,8 @@ description: 将中文短剧想法、梗概、改编材料或已有系列笔记�
 
 - **承诺、引擎、人物压力、升级与铺垫兑现**：[story-craft.md](references/story-craft.md)
 - **分集契约、因果节拍、集间交接与地图修订**：[episode-design.md](references/episode-design.md)
+- **人物驱动力、前史与切入、跨集变化、信息权限、双轨节奏与恢复记忆**：
+  [serial-character-and-memory.md](references/serial-character-and-memory.md)
 - **有原材料、需要压缩/合并人物场景/把信息视觉化**：
   [adaptation-craft.md](references/adaptation-craft.md)
 - **需要区分揭示、反转、回报和钩子，或按题材选压力机制**：
