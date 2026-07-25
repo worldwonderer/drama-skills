@@ -764,9 +764,17 @@ class PackageTests(unittest.TestCase):
         # A complete path is the only accepted shape.
         declare(shown)
 
+        # A complete URL is exempt from the length bound; a long free-form
+        # on-screen string is not.
+        declare("https://example.invalid/" + "a" * 240)
+
         rejected = {
             "bare unix marker": "/var" + "/",
             "bare windows marker": "C" + ":\\",
+            # A marker plus a delimiter is still only a marker.
+            "marker plus comma": "/var" + "/,",
+            "marker plus quote": "/var" + '/"',
+            "marker plus paren": "/var" + "/)",
             "oversize": shown + " " + "x" * 300,
             "newline": shown + "\n\u7b2c\u4e8c\u884c",
             "carriage return": shown + "\r\u7b2c\u4e8c\u884c",

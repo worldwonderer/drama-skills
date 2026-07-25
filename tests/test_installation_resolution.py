@@ -474,6 +474,26 @@ class InstallationResolutionTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     verifier.verify_skill_contract(skill, "short-drama-write")
 
+    def test_skill_contract_line_budget_counts_real_lines(self) -> None:
+        """A trailing newline must not cost a line against the 500-line cap."""
+
+        verifier = import_module_from_path(
+            "shipped_verifier_lines", SUITE / "skills/short-drama/scripts/suite_verify.py"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            skill = Path(d) / "short-drama-write"
+            shutil.copytree(SUITE / "skills/short-drama-write", skill)
+            skill_md = skill / "SKILL.md"
+            body = skill_md.read_text(encoding="utf-8").rstrip("\n").split("\n")
+            padded = body + ["padding"] * (500 - len(body))
+            self.assertEqual(len(padded), 500)
+            skill_md.write_text("\n".join(padded) + "\n", encoding="utf-8")
+            verifier.verify_skill_contract(skill, "short-drama-write")
+
+            skill_md.write_text("\n".join(padded + ["one too many"]) + "\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                verifier.verify_skill_contract(skill, "short-drama-write")
+
     def test_skill_contract_rejects_unicode_spaces_after_the_key(self) -> None:
         """A non-ASCII space is plausible in a CJK-authored file and is not YAML."""
 
