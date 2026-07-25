@@ -28,6 +28,8 @@ EXPECTED_TRUST_BOUNDARY = {
     "private_source_runtime_access": False,
 }
 OPENAI_INTERFACE_KEYS = {"display_name", "short_description", "default_prompt"}
+REQUIRED_FRONTMATTER_KEYS = {"name", "description"}
+OPTIONAL_FRONTMATTER_KEYS = {"license", "allowed-tools", "metadata"}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -52,12 +54,33 @@ def verify_skill_contract(skill: Path, expected_name: str) -> None:
         raise ValueError(f"{expected_name} SKILL.md has unclosed frontmatter") from error
     frontmatter: dict[str, str] = {}
     for line in lines[1:closing]:
-        match = re.fullmatch(r"([a-z_]+):\s+(.+)", line)
+        match = re.fullmatch(r"([a-z][a-z0-9_-]*):\s+(.+)", line)
         if match is None or match.group(1) in frontmatter:
             raise ValueError(f"{expected_name} SKILL.md has invalid frontmatter")
         frontmatter[match.group(1)] = match.group(2).strip()
-    if set(frontmatter) != {"name", "description"}:
-        raise ValueError(f"{expected_name} frontmatter keys must be name and description")
+    # The official Agent Skill contract requires name and description and allows
+    # license, allowed-tools and metadata. Keep the optional set closed so a
+    # rebuilt manifest still cannot smuggle an unknown key past the verifier.
+    if not REQUIRED_FRONTMATTER_KEYS <= set(frontmatter):
+        raise ValueError(f"{expected_name} frontmatter keys must include name and description")
+    if not set(frontmatter) <= REQUIRED_FRONTMATTER_KEYS | OPTIONAL_FRONTMATTER_KEYS:
+        raise ValueError(f"{expected_name} frontmatter keys are not allowed by the skill contract")
+    if "license" in frontmatter and not frontmatter["license"]:
+        raise ValueError(f"{expected_name} frontmatter license is empty")
+    if "allowed-tools" in frontmatter and not frontmatter["allowed-tools"]:
+        raise ValueError(f"{expected_name} frontmatter allowed-tools is empty")
+    if "metadata" in frontmatter:
+        # metadata is a mapping in the spec; a bare scalar is not a valid value.
+        try:
+            metadata_value = json.loads(frontmatter["metadata"])
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"{expected_name} frontmatter metadata must be an inline JSON object"
+            ) from error
+        if not isinstance(metadata_value, dict):
+            raise ValueError(
+                f"{expected_name} frontmatter metadata must be an inline JSON object"
+            )
     if frontmatter["name"] != expected_name:
         raise ValueError(f"{expected_name} frontmatter name does not match its directory")
     if not frontmatter["description"] or len(frontmatter["description"]) > 1024:
@@ -128,6 +151,15 @@ def verify_suite(core: Path) -> dict[str, Any]:
             # Local bytecode caches are development noise, never release content;
             # sibling skills outside public_skills are unrelated installations.
             if not path.is_file() or "__pycache__" in path.parts:
+                continue
+            # Dot-prefixed entries are editor, OS and tool noise (.DS_Store, swap
+            # files, lint caches). runtime-preflight only halts on extra
+            # executable content, so this noise must not stop the suite;
+            # update_suite_manifest applies the same rule so both agree.
+            if any(
+                part.startswith(".")
+                for part in path.relative_to(skill_source).parts
+            ):
                 continue
             child_relative = path.relative_to(skill_source).as_posix()
             relative = f"{name}/{child_relative}"

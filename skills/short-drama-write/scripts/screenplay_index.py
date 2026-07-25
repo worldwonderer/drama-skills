@@ -45,6 +45,14 @@ ASCII_DIALOGUE_RE = re.compile(
 )
 TAG_RE = re.compile(r"^\[(?P<tag>VO|OS|SFX|画面文字|连续性|转场)\]\s*(?P<body>\S[\s\S]*)$")
 ANY_TAG_RE = re.compile(r"^\[(?P<tag>[^\]\r\n]+)\]")
+# Production dialects write tags with full-width brackets (【特写】/【闪回】).
+# Without this the paragraph matches nothing and is silently emitted as an
+# action block, so the owner never learns the source needs normalization.
+# The lookahead keeps dialect dialogue (【角色名】（括注）：台词) on the
+# dialogue path, where it is already reported as ambiguous.
+FULLWIDTH_TAG_RE = re.compile(
+    r"^【(?P<tag>[^】\r\n]+)】(?!\s*(?:（[^（）\r\n]*）)?\s*[：:])"
+)
 MALFORMED_TAG_RE = re.compile(r"^\[(?:VO|OS|SFX|画面文字|连续性|转场)(?:\s|：|:)")
 VOICE_TAG_BODY_RE = re.compile(r"^(?P<speaker>[^\s：（）:\[\]#]{1,40})：(?P<text>\S[\s\S]*)$")
 BLOCK_ID_RE = re.compile(r"^BLK-(?P<scope>.+)-(?P<code>[HADPC])(?P<number>\d+)$")
@@ -316,6 +324,19 @@ def _parse_screenplay(
             )
             index = end_index + 1
             continue
+        fullwidth_tag = FULLWIDTH_TAG_RE.match(paragraph)
+        if fullwidth_tag:
+            issues.append(
+                _issue(
+                    span,
+                    "unsupported_production_tag",
+                    f"生产方言标签 【{fullwidth_tag.group('tag')}】 使用全角括号；"
+                    f"先经规范化入口转为半角 [ ]，仅支持 {', '.join(SUPPORTED_TAGS)}。",
+                )
+            )
+            index = end_index + 1
+            continue
+
         if MALFORMED_TAG_RE.match(paragraph):
             issues.append(_issue(span, "malformed_production_tag", "生产标签缺少闭合的 ]。"))
             index = end_index + 1

@@ -2062,14 +2062,35 @@ def _validate_delivery_text(
     for document in structured_documents:
         reject_structured_credentials(document)
 
+    # file URLs and private keys have no legitimate on-screen use, so they stay
+    # unconditional blocks. A machine path can be genuine story content (a
+    # hacking or investigation episode showing a path on screen), so it keeps
+    # the same declared-exception channel the URL rule uses: default blocked,
+    # released only for an exact text the creator bound to a path and field.
     unsafe_patterns = {
-        "machine path": re.compile(r"(?<![\w.])/(?:Users|home|private|var|tmp)/|\b[A-Za-z]:[\\/]"),
         "file URL": re.compile(r"\bfile://", re.IGNORECASE),
         "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     }
     for label, pattern in unsafe_patterns.items():
         if pattern.search(text):
             raise PackageBlockedError(f"{label} is excluded from delivery: {relative}")
+    machine_path_pattern = re.compile(
+        r"(?<![\w.])/(?:Users|home|private|var|tmp)/|\b[A-Za-z]:[\\/]"
+    )
+    exempt_spans = [
+        (match.start(), match.end())
+        for allowed in allowed_urls
+        for match in re.finditer(re.escape(allowed), text)
+    ]
+    for match in machine_path_pattern.finditer(text):
+        covered = any(
+            start <= match.start() and match.end() <= end
+            for start, end in exempt_spans
+        )
+        if not covered:
+            raise PackageBlockedError(
+                f"machine path is excluded from delivery: {relative}"
+            )
     url_pattern = re.compile(r"https?://[^\s<>\"'\])}，。；]+", re.IGNORECASE)
     disallowed = sorted(set(url_pattern.findall(text)) - allowed_urls)
     if disallowed:
@@ -2084,6 +2105,12 @@ def _normalize_text_exceptions(
     provenance_allowlist = {"creator_supplied", "story_world_authored"}
     text_policy_allowlist = {"visible_on_screen", "fictional_interface_text"}
     url_pattern = re.compile(r"https?://[^\s<>\"'\])}，。；]+", re.IGNORECASE)
+    # An exception releases either a complete URL or an exact on-screen string
+    # carrying a machine path. Both stay blocked by default; neither may be a
+    # loose fragment, so a path exception must still be quoted verbatim.
+    machine_path_pattern = re.compile(
+        r"(?<![\w.])/(?:Users|home|private|var|tmp)/|\b[A-Za-z]:[\\/]"
+    )
     for exception in text_exceptions or []:
         exact = exception.get("exact_text")
         bound_path = exception.get("path")
@@ -2091,7 +2118,10 @@ def _normalize_text_exceptions(
         if (
             not isinstance(exact, str)
             or not exact
-            or url_pattern.fullmatch(exact) is None
+            or (
+                url_pattern.fullmatch(exact) is None
+                and machine_path_pattern.search(exact) is None
+            )
             or not isinstance(bound_path, str)
             or not isinstance(field, str)
             or not re.fullmatch(r"[A-Za-z0-9_.:/-]+", field)

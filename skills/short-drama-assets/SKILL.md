@@ -1,6 +1,7 @@
 ---
 name: short-drama-assets
 description: "从短剧剧本拆解并统筹角色/造型、场景/视图、道具/状态和跨场连续性。用户说‘拆角色/场景/道具’、‘做资产表/角色表/场景表/道具表’、‘判断复用还是新变体’、‘更新造型/道具状态’，或拿现成剧本直接做视觉资产准备时使用；本 skill 不写资产图提示词，也不生成图片或视频。"
+license: MIT
 ---
 
 # 短剧资产拆解
@@ -19,6 +20,11 @@ description: "从短剧剧本拆解并统筹角色/造型、场景/视图、道�
 ## 边界
 
 - 资产事实只来自已接受剧本、已有 bible、连续性和创作者补充；不擅改剧情。
+- 始终读取 `short-drama.json#/creator_authority/{visual_direction,production_profile}` 中状态为
+  `accepted` 的视觉方向与制作形态：形态决定哪些身份锚点在本项目里根本可被表达——以剪影为
+  识别通道的形态与以面部结构为识别通道的形态需要不同的锚点集合；若状态为 `unset`，就向
+  创作者给出选择，不从对话记忆补造。形态可以改变锚点的表达通道与颗粒度，不得反过来改写
+  已接受的身份、地理、持物归属、可读文字政策或故事状态。
 - 只拥有 Character/Look、Location/View、Prop/State、occurrence reconciliation
   和资产状态 delta。知识/信念/目标/关系/情绪等 story-state 可以在连续性
   ledger 中被追踪，但只是带 write/develop source pointer 的投影，不是 assets
@@ -46,8 +52,8 @@ description: "从短剧剧本拆解并统筹角色/造型、场景/视图、道�
 
 ### 1. 先读事实边界
 
-读取本集剧本/index、已有 bible、上集 outgoing、创作者参考与文本政策。标记哪个
-版本已被接受。不要把旧 prompt、旧分镜或文件名当成资产真相。
+读取本集剧本/index、已有 bible、上集 outgoing、创作者参考与文本政策，以及已接受的
+视觉方向与制作形态。标记哪个版本已被接受。不要把旧 prompt、旧分镜或文件名当成资产真相。
 
 ### 2. 逐块提 occurrence，暂不创建资产
 

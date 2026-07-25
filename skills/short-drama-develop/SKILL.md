@@ -1,6 +1,7 @@
 ---
 name: short-drama-develop
-description: 将中文小说、短剧想法、梗概、改编材料或已有系列笔记发展成可追溯的改编方案、戏剧方向、创作简报、故事引擎与分集地图。用户提出“导入小说做短剧”“开发短剧”“做故事设定/系列大纲/分集规划”“把这个点子变成短剧”或需要梳理人物冲突与集间交接时使用；已有剧本可直接进入写作、资产或审查流程，不强制补开发文件。
+description: 将中文小说、短剧或漫剧想法、梗概、改编材料或已有系列笔记发展成可追溯的改编方案、戏剧方向、创作简报、导演阐述、故事引擎与分集地图，并按题材与制作形态（画风）选择写法。用户提出“导入小说做短剧”“开发短剧/漫剧”“做故事设定/系列大纲/分集规划”“写导演阐述”“这个题材怎么写”“定画风/制作形态”“把这个点子变成短剧”或需要梳理人物冲突与集间交接时使用；已有剧本可直接进入写作、资产或审查流程，不强制补开发文件。
+license: MIT
 ---
 
 # 短剧开发
@@ -44,7 +45,9 @@ description: 将中文小说、短剧想法、梗概、改编材料或已有系�
 
 每个候选都说明：戏剧承诺、主角追求、对抗机制、反复回报、可升级的状态、长线终止条件、主要制作负担。让创作者选择或组合，并记录取舍理由；未选方案不进入既定事实。
 
-需要完整方法时读取 [story-craft.md](references/story-craft.md)。
+需要完整方法时读取 [story-craft.md](references/story-craft.md)。题材已经确定时，可从
+[genre-cards.md](references/genre-cards.md) 按索引取**一张**题材卡，用来校准该题材更常用的
+压力来源、场面颗粒与制作负担；它是可被创作者一句话覆盖的参考，不替代方向选择，也不进入交付物。
 
 ### 3. 建立故事引擎
 
@@ -123,6 +126,8 @@ description: 将中文小说、短剧想法、梗概、改编材料或已有系�
   [reveal-reversal-payoff.md](references/reveal-reversal-payoff.md)
 - **按题材选择冲突推进方式、设计开场或规划集尾钩子时的定性案例方法**：
   [genre-and-hook-playbook.md](references/genre-and-hook-playbook.md)
+- **已确定题材，需要该题材更常用的压力、场面颗粒、钩子取向与制作难点**：
+  [genre-cards.md](references/genre-cards.md)（索引与召回规范；一次只读一张卡）
 - **起草项目级视觉方向与生产规则（导演阐述）**：
   [director-brief-craft.md](references/director-brief-craft.md)
 - **跨技能事实所有权或修订影响不清楚时**：[contract-and-ownership.md](../short-drama/references/contract-and-ownership.md)

@@ -64,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         and path != manifest_path
         and path not in child_refs
         and "__pycache__" not in path.parts
+        # Dot-prefixed entries are editor, OS and tool noise (.DS_Store, swap
+        # files, lint caches). Publishing them would bake local state into the
+        # manifest; suite_verify applies the same rule so both agree.
+        and not any(part.startswith(".") for part in path.relative_to(skills).parts)
         and path.suffix.lower() not in forbidden_suffixes
     }
     manifest["files"] = dict(sorted(files.items()))

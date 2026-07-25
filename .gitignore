@@ -6,3 +6,4 @@ __pycache__/
 .omx/
 tests/local-terms.txt
 maintainers/evals/
+.coverage

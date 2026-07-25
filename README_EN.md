@@ -111,8 +111,19 @@ for skill in skills/*; do
 done
 ```
 
-Remove any same-named skill links first — do not mix versions. Start from
-`$short-drama`; specific tasks can also invoke the matching skill directly.
+Remove any same-named skill links first — do not mix versions. Start from the
+router skill; specific tasks can also invoke the matching skill directly.
+
+### Invocation differs by runtime
+
+| Runtime | How to invoke |
+|---|---|
+| Claude Code | `/short-drama`, `/short-drama-write`, … — or just describe the task in plain language |
+| Codex | `$short-drama`, `$short-drama-write`, … |
+| Other Agent Skill runtimes | Follow that runtime's skill-invocation convention, or describe the task in plain language |
+
+Examples below use the `$` form; in Claude Code replace `$` with `/`, or drop the
+prefix and state the task directly.
 
 ## Quick start
 

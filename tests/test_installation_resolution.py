@@ -367,7 +367,7 @@ class InstallationResolutionTests(unittest.TestCase):
             skill_md = skills / "short-drama-write/SKILL.md"
             skill_md.write_text(
                 skill_md.read_text(encoding="utf-8").replace(
-                    "---\n\n#", "metadata: forbidden\n---\n\n#", 1
+                    "---\n\n#", "unexpected_key: forbidden\n---\n\n#", 1
                 ),
                 encoding="utf-8",
             )
@@ -387,6 +387,98 @@ class InstallationResolutionTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 2)
             self.assertIn("frontmatter keys", completed.stderr)
+
+    def test_shipped_skills_declare_a_license(self) -> None:
+        """The MIT license must travel with a symlinked skill directory."""
+
+        for skill_md in sorted((SUITE / "skills").glob("*/SKILL.md")):
+            with self.subTest(skill=skill_md.parent.name):
+                frontmatter = skill_md.read_text(encoding="utf-8").split("---", 2)[1]
+                self.assertRegex(frontmatter, r"(?m)^license: MIT$")
+
+    def test_skill_contract_accepts_the_official_optional_frontmatter_keys(self) -> None:
+        """allowed-tools and metadata are spec-legal and must pass."""
+
+        for extra in ('allowed-tools: Read, Grep', 'metadata: {"a":"b"}'):
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
+                skills = copy_installed_suite(Path(directory))
+                skill_md = skills / "short-drama-write/SKILL.md"
+                skill_md.write_text(
+                    skill_md.read_text(encoding="utf-8").replace(
+                        "---\n\n#", f"{extra}\n---\n\n#", 1
+                    ),
+                    encoding="utf-8",
+                )
+                rebuilt = subprocess.run(
+                    [sys.executable, str(UPDATE_TOOL), str(skills / "short-drama")],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+                completed = subprocess.run(
+                    [sys.executable, str(VERIFY_TOOL), str(skills / "short-drama")],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_skill_contract_rejects_scalar_metadata(self) -> None:
+        """metadata is a mapping in the spec; a bare scalar must not pass."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            skills = copy_installed_suite(Path(directory))
+            skill_md = skills / "short-drama-write/SKILL.md"
+            skill_md.write_text(
+                skill_md.read_text(encoding="utf-8").replace(
+                    "---\n\n#", "metadata: forbidden\n---\n\n#", 1
+                ),
+                encoding="utf-8",
+            )
+            rebuilt = subprocess.run(
+                [sys.executable, str(UPDATE_TOOL), str(skills / "short-drama")],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+            completed = subprocess.run(
+                [sys.executable, str(VERIFY_TOOL), str(skills / "short-drama")],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("metadata must be an inline JSON object", completed.stderr)
+
+    def test_manifest_generator_excludes_local_dot_noise(self) -> None:
+        """A stray .DS_Store must never be baked into the published manifest."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            skills = copy_installed_suite(Path(directory))
+            manifest_path = skills / "short-drama/suite-manifest.json"
+            before = len(json.loads(manifest_path.read_text(encoding="utf-8"))["files"])
+            (skills / "short-drama-storyboard/.DS_Store").write_bytes(b"\x00")
+            rebuilt = subprocess.run(
+                [sys.executable, str(UPDATE_TOOL), str(skills / "short-drama")],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+            files = json.loads(manifest_path.read_text(encoding="utf-8"))["files"]
+            self.assertEqual(len(files), before)
+            self.assertNotIn("short-drama-storyboard/.DS_Store", files)
+
+            # The verifier must agree with the generator, or preflight halts.
+            completed = subprocess.run(
+                [sys.executable, str(VERIFY_TOOL), str(skills / "short-drama")],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":

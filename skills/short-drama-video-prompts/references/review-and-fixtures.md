@@ -28,6 +28,8 @@ Finding 必须含 artifact/hash、引用片段、影响、required fix、owner�
 | End fidelity | reported end 是否逐项等于 continuity out？ | end report + source end |
 | Economy | frame 已承载外观是否被无谓倾倒？ | reference contents + copy block |
 | Shot boundary | 是否偷改 duration/end/next shot 或藏多次 cut？ | source shot + motion |
+| Segment integrity | 每个计时段是否只有一个连续视角？各段相加是否正好等于 duration？ | segment 列表 + accepted duration |
+| Deliverable text | 交付文本里是否只剩要拍的画面内容，没有文件名、版本号、锁定标记、草图指代或任务备注？ | prompt 正文 |
 
 语义 finding 的修复应指出删/改哪一段 motion，或该向哪个 owner 发 revision request，而不是笼统说“动作自然一点”。
 
@@ -44,6 +46,9 @@ Finding 必须含 artifact/hash、引用片段、影响、required fix、owner�
 | VID_SEMANTIC_INVENTION | reviewed_invariant | reviewer | error | video-prompts | 新造故事、关系、知识、状态或音频事实 |
 | VID_CAMERA_UNMOTIVATED | craft_default | reviewer | warning | video-prompts | movement 无助于目的/注意变化 |
 | VID_REFERENCE_DUMP | craft_default | reviewer | warning | video-prompts | bound frame 已带外观却重复整本 bible |
+| VID_HIDDEN_CUT_IN_SEGMENT | reviewed_invariant | reviewer | error | video-prompts | 单个计时段内藏入视角或空间跳变，等于一次未申报的剪辑 |
+| VID_UNEXECUTABLE_MICRO_METRIC | craft_default | reviewer | warning | video-prompts | 亚秒偏移、厘米位移、角度数等读起来精确却无法执行也无法验证的计量 |
+| VID_INNER_MONOLOGUE_ONLY | craft_default | reviewer | warning | video-prompts | 绝大多数段落只有内心活动，没有可拍的可见事件或有来源的声音 |
 | VID_STYLE_ALTERNATIVE | taste_option | reviewer | note | video-prompts | 表演/摄影/声音风格的非阻断选择 |
 
 语义问题只能由 reviewer 证据化判断；不要写正则把“缓慢”“同时”或动词数量变成错误。
@@ -94,3 +99,39 @@ Reviewer 应引用房间距离、物件操作、对白和 landing 说明不可�
 > 画外问话后，突然响起爆炸，所有灯熄灭，她大喊“我承认了”。
 
 若 source 没有爆炸、停电和这句对白，这会改变故事与 continuity。由 reviewer 引用 source 缺失与 prompt 新句给 `VID_SEMANTIC_INVENTION`，不是因关键词“爆炸”本身被正则禁止。
+
+### 反例 E：段内藏切
+
+```text
+段 2（1.6–3.4s）：她把登记簿推入工具盒下方；随即是走廊外一只手停在门把上的近景；
+再回到她的侧脸，眉心收紧。
+```
+
+技能正文已经规定一条提示词只保持一个剪辑边界，但违规通常不出现在 `camera` 字段冲突里，
+它藏在**一个计时段内部**的连续叙述中，读起来只是“镜头很有节奏”。量表要能抓到它，
+而不只是禁止它：逐段列出空间锚点、被摄主体和机位关系，段内出现没有过渡的空间或主体
+跳变，就是一次未申报的剪辑。修复是向 storyboard 请求拆成两个 authored shots，或删掉插入的
+外景段落；不能靠补一个转场词把它说圆。
+
+### 反例 F：不可执行的微计量
+
+```text
+0.00–0.37s：眉心下压 0.4 厘米；0.37–0.92s：右手向左平移 3 厘米，头部旋转 7 度；
+0.92–1.41s：瞳孔收缩，肩线下沉 1.2 厘米。
+```
+
+这类写法读起来像精度，实际没有指定任何可执行的东西：执行端无法把厘米和度数对到画面
+尺度，审查者也无法验证是否照做；同时它挤掉了真正需要写清的触发、接触与结果。修复是
+换成可比较的相对量与接触事实——“手指移到杯沿并停住”“视线从对方脸上落到桌面签名处”。
+只有上游提供、且确实能消除歧义时才写具体秒段（见 `motion-recipe.md` 3.6）。
+
+### 反例 G：整段独白
+
+```text
+段 1：她想起母亲临走前那句话。段 2：她意识到自己再也回不去了。段 3：她下定决心。
+```
+
+三段都只有内心活动，没有一件可拍的事。没有可执行内容时，执行端会自行发明动作与表情
+去填满时间，结果与剧本无关。修复是让每段至少落到一个可见事件（目光、接触、位移、决断
+动作）或一段有来源的声音；确实需要内心过程时，用已接受的画外音承载，并写清它与画面
+事件的相对时机。内心独白本身不是缺陷，把它当作整条提示词的唯一内容才是。

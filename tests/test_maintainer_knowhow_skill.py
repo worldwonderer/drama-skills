@@ -62,9 +62,10 @@ class MaintainerKnowhowSkillTests(unittest.TestCase):
         keys = {
             match.group(1)
             for line in frontmatter.splitlines()
-            if (match := re.fullmatch(r"([a-z_]+):\s+.+", line))
+            if (match := re.fullmatch(r"([a-z][a-z0-9_-]*):\s+.+", line))
         }
-        self.assertEqual(keys, {"name", "description"})
+        self.assertLessEqual({"name", "description"}, keys)
+        self.assertLessEqual(keys, {"name", "description", "license", "allowed-tools", "metadata"})
         self.assertRegex(frontmatter, r"(?m)^name: short-drama-knowhow$")
         self.assertIn("维护者专用", frontmatter)
         self.assertNotIn("TODO", text)
