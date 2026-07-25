@@ -453,6 +453,46 @@ class InstallationResolutionTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 2)
                 self.assertIn("control characters", completed.stderr)
 
+    def test_skill_contract_bounds_metadata_and_rejects_non_json_constants(self) -> None:
+        """metadata must stay a bounded, round-trippable JSON object."""
+
+        verifier = import_module_from_path(
+            "shipped_verifier_meta", SUITE / "skills/short-drama/scripts/suite_verify.py"
+        )
+        for label, value in (
+            ("oversize", '{"a":"' + "x" * 1100 + '"}'),
+            ("NaN", '{"a":NaN}'),
+            ("Infinity", '{"a":Infinity}'),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as d:
+                skill = Path(d) / "short-drama-write"
+                shutil.copytree(SUITE / "skills/short-drama-write", skill)
+                skill_md = skill / "SKILL.md"
+                lines = skill_md.read_text(encoding="utf-8").split("\n")
+                lines.insert(2, f"metadata: {value}")
+                skill_md.write_text("\n".join(lines), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    verifier.verify_skill_contract(skill, "short-drama-write")
+
+    def test_skill_contract_rejects_unicode_spaces_after_the_key(self) -> None:
+        """A non-ASCII space is plausible in a CJK-authored file and is not YAML."""
+
+        verifier = import_module_from_path(
+            "shipped_verifier_space", SUITE / "skills/short-drama/scripts/suite_verify.py"
+        )
+        # Use a key the shipped file does not already carry, or duplicate-key
+        # detection would raise regardless of the separator under test.
+        for space in ("\u00a0", "\u2009", "\u3000"):
+            with self.subTest(space=repr(space)), tempfile.TemporaryDirectory() as d:
+                skill = Path(d) / "short-drama-write"
+                shutil.copytree(SUITE / "skills/short-drama-write", skill)
+                skill_md = skill / "SKILL.md"
+                lines = skill_md.read_text(encoding="utf-8").split("\n")
+                lines.insert(2, 'metadata:' + space + '{"a":"b"}')
+                skill_md.write_text("\n".join(lines), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    verifier.verify_skill_contract(skill, "short-drama-write")
+
     def test_skill_contract_accepts_the_official_optional_frontmatter_keys(self) -> None:
         """metadata is spec-legal and must pass as an inline JSON object."""
 
@@ -532,16 +572,50 @@ class InstallationResolutionTests(unittest.TestCase):
         verifier = import_module_from_path(
             "shipped_verifier", SUITE / "skills/short-drama/scripts/suite_verify.py"
         )
-        self.assertEqual(generator.NOISE_DIR_NAMES, verifier.NOISE_DIR_NAMES)
-        self.assertEqual(generator.NOISE_FILE_NAMES, verifier.NOISE_FILE_NAMES)
-        self.assertEqual(generator.NOISE_FILE_SUFFIXES, verifier.NOISE_FILE_SUFFIXES)
+        # Compare behaviour, not constants: matching sets would still pass if
+        # one function body drifted.
+        names = [
+            "SKILL.md", "payload.py", "evil.sh", "x.pyc", "x.pyo", ".DS_Store",
+            ".env", "a.swp", "b~", "note.md", "data.json", ".bootstrap.sh",
+            # A file whose own name matches a noise directory: distinguishes a
+            # body that scans parts[:-1] from one that scans every component.
+            ".ruff_cache", "__pycache__", ".mypy_cache",
+        ]
+        directories = [
+            (), ("references",), ("__pycache__",), (".ruff_cache",),
+            (".hidden",), (".ruff_cache", "0.1.2"), ("scripts", "__pycache__"),
+            (".DS_Store",), ("__pycache__", "nested"),
+        ]
+        checked = 0
+        for directory in directories:
+            for name in names:
+                parts = directory + (name,)
+                self.assertEqual(
+                    generator.is_local_noise(parts),
+                    verifier.is_local_noise(parts),
+                    parts,
+                )
+                checked += 1
+        self.assertGreaterEqual(checked, 100)
+
+    def test_executable_content_is_never_treated_as_noise(self) -> None:
+        """A payload planted inside a cache directory must stay reported."""
+
+        verifier = import_module_from_path(
+            "shipped_verifier_exec", SUITE / "skills/short-drama/scripts/suite_verify.py"
+        )
         for parts in (
-            (".hidden", "payload.py"), (".env",), ("scripts", ".bootstrap.sh"),
-            (".DS_Store",), ("__pycache__", "x.pyc"), ("a.swp",),
+            ("__pycache__", "payload.py"),
+            (".ruff_cache", "payload.py"),
+            (".mypy_cache", "evil.sh"),
+            (".hidden", "payload.py"),
+            (".DS_Store", "payload.py"),
         ):
-            self.assertEqual(
-                generator.is_local_noise(parts), verifier.is_local_noise(parts), parts
-            )
+            with self.subTest(parts=parts):
+                self.assertFalse(verifier.is_local_noise(parts))
+        # Bytecode itself is still tolerated, or every run would fail.
+        self.assertTrue(verifier.is_local_noise(("__pycache__", "mod.pyc")))
+        self.assertFalse(verifier.is_local_noise(("__pycache__", "notes.txt")))
 
     def test_manifest_generator_excludes_local_dot_noise(self) -> None:
         """A stray .DS_Store must never be baked into the published manifest."""

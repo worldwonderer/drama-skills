@@ -2,7 +2,7 @@
 
 ## 时长门槛
 
-- `VID-04` — 显式标时的各段不得合计超过 accepted duration。
+- `VID-04` — 显式标时的各段必须合计等于 accepted duration：超出与留下未分配余量同样违约。
 - `VID-05` — 未标时的 action load 是 `reviewed_invariant`：根据本镜头证据审查
   表演和故事变化是否仍可读，不套通用“每秒几个动词”公式。
 

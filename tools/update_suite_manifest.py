@@ -12,17 +12,30 @@ from pathlib import Path
 # Kept byte-identical to skills/short-drama/scripts/suite_verify.py; a test
 # asserts the two agree. Closed on purpose: an unknown dot-path stays visible
 # so extra executable content is still reported instead of silently skipped.
-NOISE_DIR_NAMES = frozenset({"__pycache__", ".ruff_cache", ".mypy_cache", ".pytest_cache"})
+NOISE_DIR_NAMES = frozenset({".ruff_cache", ".mypy_cache", ".pytest_cache"})
 NOISE_FILE_NAMES = frozenset({".DS_Store"})
 NOISE_FILE_SUFFIXES = ("~", ".swp", ".swo")
+BYTECODE_SUFFIXES = (".pyc", ".pyo")
+EXECUTABLE_SUFFIXES = (
+    ".py", ".sh", ".bash", ".zsh", ".fish", ".js", ".mjs", ".cjs",
+    ".rb", ".pl", ".php", ".exe", ".dll", ".so", ".dylib", ".command",
+)
 
 
 def is_local_noise(parts: tuple[str, ...]) -> bool:
     """True only for known-noise artifacts, never for arbitrary dot-paths."""
 
+    name = parts[-1]
+    # Executable content is never noise, wherever it sits. A payload planted
+    # inside a cache directory stays reported.
+    if name.endswith(EXECUTABLE_SUFFIXES):
+        return False
+    # Bytecode caches regenerate at runtime, so the bytecode itself is
+    # tolerated; anything else under them is not.
+    if "__pycache__" in parts[:-1]:
+        return name.endswith(BYTECODE_SUFFIXES)
     if any(part in NOISE_DIR_NAMES for part in parts[:-1]):
         return True
-    name = parts[-1]
     return name in NOISE_FILE_NAMES or name.endswith(NOISE_FILE_SUFFIXES)
 
 

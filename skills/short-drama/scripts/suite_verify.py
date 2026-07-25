@@ -33,18 +33,33 @@ OPENAI_INTERFACE_KEYS = {"display_name", "short_description", "default_prompt"}
 # manifest and this verifier, so an extra executable file is still reported and
 # runtime-preflight's "额外可执行文件 -> 停止写入" promise still holds.
 # tools/update_suite_manifest.py repeats these sets; a test asserts they agree.
-NOISE_DIR_NAMES = frozenset({"__pycache__", ".ruff_cache", ".mypy_cache", ".pytest_cache"})
+NOISE_DIR_NAMES = frozenset({".ruff_cache", ".mypy_cache", ".pytest_cache"})
 NOISE_FILE_NAMES = frozenset({".DS_Store"})
 NOISE_FILE_SUFFIXES = ("~", ".swp", ".swo")
+BYTECODE_SUFFIXES = (".pyc", ".pyo")
+EXECUTABLE_SUFFIXES = (
+    ".py", ".sh", ".bash", ".zsh", ".fish", ".js", ".mjs", ".cjs",
+    ".rb", ".pl", ".php", ".exe", ".dll", ".so", ".dylib", ".command",
+)
 
 
 def is_local_noise(parts: tuple[str, ...]) -> bool:
     """True only for known-noise artifacts, never for arbitrary dot-paths."""
 
+    name = parts[-1]
+    # Executable content is never noise, wherever it sits. A payload planted
+    # inside a cache directory stays reported.
+    if name.endswith(EXECUTABLE_SUFFIXES):
+        return False
+    # Bytecode caches regenerate at runtime, so the bytecode itself is
+    # tolerated; anything else under them is not.
+    if "__pycache__" in parts[:-1]:
+        return name.endswith(BYTECODE_SUFFIXES)
     if any(part in NOISE_DIR_NAMES for part in parts[:-1]):
         return True
-    name = parts[-1]
     return name in NOISE_FILE_NAMES or name.endswith(NOISE_FILE_SUFFIXES)
+
+
 REQUIRED_FRONTMATTER_KEYS = {"name", "description"}
 # allowed-tools is spec-legal but deliberately not accepted here: it grants tool
 # access, and this suite's trust boundary (EXPECTED_TRUST_BOUNDARY) declares no
@@ -71,6 +86,8 @@ def verify_skill_contract(skill: Path, expected_name: str) -> None:
     # frontmatter no YAML parser can load, so split on \n only and reject the
     # control characters outright.
     lines = raw.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
     if len(lines) > 500:
         raise ValueError(f"{expected_name} SKILL.md exceeds 500 lines")
     if not lines or lines[0] != "---":

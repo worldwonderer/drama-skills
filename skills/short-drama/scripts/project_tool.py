@@ -31,11 +31,21 @@ PROJECT_FILE = "short-drama.json"
 # release it. Declarations are checked against the complete form, which
 # requires at least one character after the marker, so a marker on its own can
 # never be declared and act as a wildcard over every path sharing it.
+# A path token ends at whitespace or at a character that cannot continue a
+# path: quotes and braces (so a path inside a JSON string is captured without
+# its delimiters) and CJK punctuation (so prose that ends a sentence right
+# after a path is captured without the full stop).
+_PATH_TAIL = r"[^\s\"'`,;<>)\]}，。；：、！？（）【】「」]"
+# The leading guard excludes only ASCII path-continuation characters, so a path
+# written straight after a CJK character — the normal case in this product —
+# is still detected, while a URL's own path is not double-reported.
 MACHINE_PATH_TOKEN_RE = re.compile(
-    r"(?<![\w.])/(?:Users|home|private|var|tmp)/\S*|\b[A-Za-z]:[\\/]\S*"
+    rf"(?<![A-Za-z0-9_.\-])/(?:Users|home|private|var|tmp)/{_PATH_TAIL}*"
+    rf"|(?<![A-Za-z0-9])[A-Za-z]:[\\/]{_PATH_TAIL}*"
 )
 MACHINE_PATH_COMPLETE_RE = re.compile(
-    r"(?<![\w.])/(?:Users|home|private|var|tmp)/\S+|\b[A-Za-z]:[\\/]\S+"
+    rf"(?<![A-Za-z0-9_.\-])/(?:Users|home|private|var|tmp)/{_PATH_TAIL}+"
+    rf"|(?<![A-Za-z0-9])[A-Za-z]:[\\/]{_PATH_TAIL}+"
 )
 # On-screen text is a single displayed string, never a document. Bounding it
 # stops a whole-file declaration from acting as a blanket release.
@@ -2130,8 +2140,15 @@ def _normalize_text_exceptions(
         if (
             not isinstance(exact, str)
             or not exact
-            or len(exact) > MAX_TEXT_EXCEPTION_LENGTH
-            or "\n" in exact
+            # A complete URL is inherently a single token, so the length bound
+            # only needs to constrain free-form on-screen strings.
+            or (
+                len(exact) > MAX_TEXT_EXCEPTION_LENGTH
+                and url_pattern.fullmatch(exact) is None
+            )
+            # Any line break or control character, not just \n: a declaration
+            # spanning lines is a document, not a single on-screen string.
+            or any(character < " " or character in "\x7f\x85  " for character in exact)
             or (
                 url_pattern.fullmatch(exact) is None
                 and MACHINE_PATH_COMPLETE_RE.search(exact) is None

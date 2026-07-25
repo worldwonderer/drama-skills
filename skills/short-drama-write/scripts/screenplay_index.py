@@ -329,24 +329,6 @@ def _parse_screenplay(
             )
             index = end_index + 1
             continue
-        fullwidth_tag = FULLWIDTH_TAG_RE.match(paragraph)
-        if fullwidth_tag:
-            issues.append(
-                _issue(
-                    span,
-                    "unsupported_production_tag",
-                    f"【{fullwidth_tag.group('tag')}】 是生产方言写法，不是本套件的生产标签；"
-                    f"受支持的标签是半角 [ ] 加 {', '.join(SUPPORTED_TAGS)}。"
-                    "先经规范化入口判断它应当成为动作、画面文字还是转场，再发布。",
-                )
-            )
-            # Still emit the block: this paragraph was an action block before
-            # the diagnosis existed, and dropping it would renumber every
-            # later block ID and break existing downstream references.
-            append_block("action", span, production=False)
-            index = end_index + 1
-            continue
-
         if MALFORMED_TAG_RE.match(paragraph):
             issues.append(_issue(span, "malformed_production_tag", "生产标签缺少闭合的 ]。"))
             index = end_index + 1
@@ -385,6 +367,23 @@ def _parse_screenplay(
             )
             index = end_index + 1
             continue
+
+        # Diagnosed last, so only paragraphs that would already be plain action
+        # are reported. Anything a dialect writes with a colon (【音效：…】,
+        # 【角色名】(括注)：台词) has been claimed by the dialogue paths above
+        # and keeps main's disposition, and the block is still emitted here, so
+        # no block ID moves in either direction.
+        fullwidth_tag = FULLWIDTH_TAG_RE.match(paragraph)
+        if fullwidth_tag:
+            issues.append(
+                _issue(
+                    span,
+                    "unsupported_production_tag",
+                    f"【{fullwidth_tag.group('tag')}】 是生产方言写法，不是本套件的生产标签；"
+                    f"受支持的标签是半角 [ ] 加 {', '.join(SUPPORTED_TAGS)}。"
+                    "先经规范化入口判断它应当成为动作、画面文字还是转场，再发布。",
+                )
+            )
 
         append_block("action", span, production=False)
         index = end_index + 1

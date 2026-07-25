@@ -66,7 +66,8 @@
   the [supersession decision example](../assets/supersession-decision.example.json)
   when that decision is needed.
 
-Explicit timing sums over duration are structural errors. Untimed overload is a
+Explicit timing that does not sum exactly to the accepted duration—over or
+under—is a structural error. Untimed overload is a
 reviewed feasibility question: cite which action/performance/story beat would be
 lost, not a universal verbs-per-second formula.
 
@@ -113,6 +114,6 @@ ellipsis, dream, or deliberate disorientation.
   declared transition;
 - lip-sync mismatch: dialogue bound to the wrong character, inner monologue
   written as mouthed speech, or extra lines the source dialogue never contained;
-- explicit segment timings that sum past the shot duration;
+- explicit segment timings that do not sum exactly to the shot duration, in either direction;
 - emotion-intensity mismatch between stated level and described performance
   (a declared 9/10 rage performed as mild irritation, or the reverse).

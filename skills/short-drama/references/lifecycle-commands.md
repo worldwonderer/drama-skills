@@ -65,3 +65,8 @@ Markdown、JSON 或 JSONL。故事中确实需要交付屏显网址或屏显机�
 例外只释放它逐字声明的那一个字符串：路径必须写到完整的那一条，只写盘符或目录开头会被
 拒绝，整段文档也不能当作一条例外。文件协议网址、私钥与结构化凭据字段无条件阻断，
 没有例外通道。
+
+每条例外必须写齐七个字段，缺一即整体拒绝：`exact_text`（逐字原文）、`path`（绑定到哪个
+交付文件）、`field`（该文字在产物中的字段位置）、`purpose`（固定为 `on_screen_text`）、
+`provenance`（`creator_supplied` 或 `story_world_authored`）、`text_policy`
+（`visible_on_screen` 或 `fictional_interface_text`）、`allow_delivery`（必须为 `true`）。
