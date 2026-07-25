@@ -26,6 +26,20 @@ from typing import Any
 
 
 PROJECT_FILE = "short-drama.json"
+# A machine-path token is the leading marker plus the rest of the path.
+# Delivery scans the token form, so an exception must quote a whole path to
+# release it. Declarations are checked against the complete form, which
+# requires at least one character after the marker, so a marker on its own can
+# never be declared and act as a wildcard over every path sharing it.
+MACHINE_PATH_TOKEN_RE = re.compile(
+    r"(?<![\w.])/(?:Users|home|private|var|tmp)/\S*|\b[A-Za-z]:[\\/]\S*"
+)
+MACHINE_PATH_COMPLETE_RE = re.compile(
+    r"(?<![\w.])/(?:Users|home|private|var|tmp)/\S+|\b[A-Za-z]:[\\/]\S+"
+)
+# On-screen text is a single displayed string, never a document. Bounding it
+# stops a whole-file declaration from acting as a blanket release.
+MAX_TEXT_EXCEPTION_LENGTH = 200
 STATE_FILE = Path(".short-drama/state.json")
 OPERATIONS_DIR = Path(".short-drama")
 ABSENT_HASH: None = None
@@ -2074,15 +2088,15 @@ def _validate_delivery_text(
     for label, pattern in unsafe_patterns.items():
         if pattern.search(text):
             raise PackageBlockedError(f"{label} is excluded from delivery: {relative}")
-    machine_path_pattern = re.compile(
-        r"(?<![\w.])/(?:Users|home|private|var|tmp)/|\b[A-Za-z]:[\\/]"
-    )
+    # Match the whole path token, not just its prefix. Containment is checked
+    # against the full token, so declaring a bare prefix cannot release every
+    # path that happens to share it.
     exempt_spans = [
         (match.start(), match.end())
         for allowed in allowed_urls
         for match in re.finditer(re.escape(allowed), text)
     ]
-    for match in machine_path_pattern.finditer(text):
+    for match in MACHINE_PATH_TOKEN_RE.finditer(text):
         covered = any(
             start <= match.start() and match.end() <= end
             for start, end in exempt_spans
@@ -2106,11 +2120,9 @@ def _normalize_text_exceptions(
     text_policy_allowlist = {"visible_on_screen", "fictional_interface_text"}
     url_pattern = re.compile(r"https?://[^\s<>\"'\])}，。；]+", re.IGNORECASE)
     # An exception releases either a complete URL or an exact on-screen string
-    # carrying a machine path. Both stay blocked by default; neither may be a
-    # loose fragment, so a path exception must still be quoted verbatim.
-    machine_path_pattern = re.compile(
-        r"(?<![\w.])/(?:Users|home|private|var|tmp)/|\b[A-Za-z]:[\\/]"
-    )
+    # whose machine paths are quoted in full. A declaration that is only a path
+    # prefix (or that carries no complete path token) is rejected, so it cannot
+    # act as a wildcard over every path sharing that prefix.
     for exception in text_exceptions or []:
         exact = exception.get("exact_text")
         bound_path = exception.get("path")
@@ -2118,9 +2130,11 @@ def _normalize_text_exceptions(
         if (
             not isinstance(exact, str)
             or not exact
+            or len(exact) > MAX_TEXT_EXCEPTION_LENGTH
+            or "\n" in exact
             or (
                 url_pattern.fullmatch(exact) is None
-                and machine_path_pattern.search(exact) is None
+                and MACHINE_PATH_COMPLETE_RE.search(exact) is None
             )
             or not isinstance(bound_path, str)
             or not isinstance(field, str)

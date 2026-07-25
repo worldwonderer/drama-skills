@@ -27,6 +27,8 @@ questions. The index is navigation, not a formula sheet.
 | 连载人物与恢复记忆 | [serial-character-and-memory](../../short-drama-develop/references/serial-character-and-memory.md#8-建立可恢复的跨集记忆) | 跨集人物策略、信息权限与铺垫债务较重 | 单场任务不必建立全量记忆 |
 | 长材料改编 | [adaptation-craft](../../short-drama-develop/references/adaptation-craft.md#2-用功能账本压缩) | 压缩、合并或把说明转成屏幕载体 | 不复制原句或文风到新剧本 |
 | 题材条件与钩子 | [genre-and-hook-playbook](../../short-drama-develop/references/genre-and-hook-playbook.md#不同题材怎么推进) | 需要按压力机制比较题材写法 | 不把案例节拍、数字或标签当公式 |
+| 单题材执行细节 | [genre-cards](../../short-drama-develop/references/genre-cards.md) | 已确定题材、要落到场面颗粒与打法 | 一次只读一张卡；卡片不产生可阻断约束 |
+| 单形态执行细节 | [production-form-profiles](production-form-profiles.md#按形态选择可执行词汇) | 已确定制作形态、要按表定位一张形态卡 | 一次只读一张卡；形态不改写身份与地理 |
 | 场景与可表演行动 | [script-craft](../../short-drama-write/references/script-craft.md#3-场景发动机目标反对转向退出) | 把单集节拍落实成场景 | 不决定分镜景别和运镜 |
 | 对白行动与人物声音 | [dialogue-craft](../../short-drama-write/references/dialogue-craft.md#3-台词是一种行动) | 写、改或诊断对白 | 不按句长、口癖数量判权力 |
 | 剧本生产标签 | [screenplay-format](../../short-drama-write/references/screenplay-format.md#3-动作对白与生产标签) | 规范化对白、动作、VO/OS、文字与连续性 | 不借格式补造剧情 |
@@ -130,7 +132,7 @@ questions. The index is navigation, not a formula sheet.
 | VID-01 | structural_invariant | Motion reads but cannot rewrite shot start/end/duration/dialogue and next-shot state. |
 | VID-02 | craft_default | Write start anchor, ordered subject motion, performance change, camera behavior, environment/audio, timing, and end report. |
 | VID-03 | craft_default | When a reference frame carries appearance/composition, focus prose on change instead of repeating the bible. |
-| VID-04 | structural_invariant | Explicit segment timing cannot exceed declared duration. |
+| VID-04 | structural_invariant | Explicit segment timing sums exactly to the accepted duration—neither exceeding it nor leaving an unallocated remainder. |
 | VID-05 | reviewed_invariant | Untimed action load must be feasible enough to preserve the intended performance and story change. |
 | VID-06 | structural_invariant | Locked and moving camera instructions cannot govern the same interval without an explicit transition. |
 | VID-07 | taste_option | Camera may be locked or moving; audio/lip-sync detail follows the chosen production profile. |

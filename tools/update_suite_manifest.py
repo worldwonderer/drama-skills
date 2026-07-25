@@ -9,6 +9,23 @@ import sys
 from pathlib import Path
 
 
+# Kept byte-identical to skills/short-drama/scripts/suite_verify.py; a test
+# asserts the two agree. Closed on purpose: an unknown dot-path stays visible
+# so extra executable content is still reported instead of silently skipped.
+NOISE_DIR_NAMES = frozenset({"__pycache__", ".ruff_cache", ".mypy_cache", ".pytest_cache"})
+NOISE_FILE_NAMES = frozenset({".DS_Store"})
+NOISE_FILE_SUFFIXES = ("~", ".swp", ".swo")
+
+
+def is_local_noise(parts: tuple[str, ...]) -> bool:
+    """True only for known-noise artifacts, never for arbitrary dot-paths."""
+
+    if any(part in NOISE_DIR_NAMES for part in parts[:-1]):
+        return True
+    name = parts[-1]
+    return name in NOISE_FILE_NAMES or name.endswith(NOISE_FILE_SUFFIXES)
+
+
 CHILD_REF_KEYS = {
     "suite",
     "suite_version",
@@ -63,11 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         if path.is_file()
         and path != manifest_path
         and path not in child_refs
-        and "__pycache__" not in path.parts
-        # Dot-prefixed entries are editor, OS and tool noise (.DS_Store, swap
-        # files, lint caches). Publishing them would bake local state into the
-        # manifest; suite_verify applies the same rule so both agree.
-        and not any(part.startswith(".") for part in path.relative_to(skills).parts)
+        and not is_local_noise(path.relative_to(skills).parts)
         and path.suffix.lower() not in forbidden_suffixes
     }
     manifest["files"] = dict(sorted(files.items()))

@@ -28,8 +28,30 @@ EXPECTED_TRUST_BOUNDARY = {
     "private_source_runtime_access": False,
 }
 OPENAI_INTERFACE_KEYS = {"display_name", "short_description", "default_prompt"}
+# Editor, OS and tool artifacts that are never release content. The list is
+# deliberately closed: anything not named here stays visible to both the
+# manifest and this verifier, so an extra executable file is still reported and
+# runtime-preflight's "额外可执行文件 -> 停止写入" promise still holds.
+# tools/update_suite_manifest.py repeats these sets; a test asserts they agree.
+NOISE_DIR_NAMES = frozenset({"__pycache__", ".ruff_cache", ".mypy_cache", ".pytest_cache"})
+NOISE_FILE_NAMES = frozenset({".DS_Store"})
+NOISE_FILE_SUFFIXES = ("~", ".swp", ".swo")
+
+
+def is_local_noise(parts: tuple[str, ...]) -> bool:
+    """True only for known-noise artifacts, never for arbitrary dot-paths."""
+
+    if any(part in NOISE_DIR_NAMES for part in parts[:-1]):
+        return True
+    name = parts[-1]
+    return name in NOISE_FILE_NAMES or name.endswith(NOISE_FILE_SUFFIXES)
 REQUIRED_FRONTMATTER_KEYS = {"name", "description"}
-OPTIONAL_FRONTMATTER_KEYS = {"license", "allowed-tools", "metadata"}
+# allowed-tools is spec-legal but deliberately not accepted here: it grants tool
+# access, and this suite's trust boundary (EXPECTED_TRUST_BOUNDARY) declares no
+# outbound network, no provider calls and no media generation. Accepting it
+# unvalidated would let a skill claim tools the declared boundary forbids.
+OPTIONAL_FRONTMATTER_KEYS = {"license", "metadata"}
+MAX_METADATA_LENGTH = 1024
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -43,7 +65,12 @@ def verify_skill_contract(skill: Path, expected_name: str) -> None:
     """Verify the portable subset of the official Agent Skill contract."""
 
     skill_md = skill / "SKILL.md"
-    lines = skill_md.read_text(encoding="utf-8").splitlines()
+    raw = skill_md.read_text(encoding="utf-8")
+    # str.splitlines() also splits on \x0b \x0c \x1c \x1d \x1e \x85  ,
+    # which YAML rejects. Splitting on those would let this verifier attest a
+    # frontmatter no YAML parser can load, so split on \n only and reject the
+    # control characters outright.
+    lines = raw.split("\n")
     if len(lines) > 500:
         raise ValueError(f"{expected_name} SKILL.md exceeds 500 lines")
     if not lines or lines[0] != "---":
@@ -54,7 +81,11 @@ def verify_skill_contract(skill: Path, expected_name: str) -> None:
         raise ValueError(f"{expected_name} SKILL.md has unclosed frontmatter") from error
     frontmatter: dict[str, str] = {}
     for line in lines[1:closing]:
-        match = re.fullmatch(r"([a-z][a-z0-9_-]*):\s+(.+)", line)
+        if any(character < " " or character in "\x7f\x85  " for character in line):
+            raise ValueError(f"{expected_name} SKILL.md frontmatter has control characters")
+        # Literal spaces only: \s would also accept the control characters and
+        # line separators that YAML rejects.
+        match = re.fullmatch(r"([a-z][a-z0-9_-]*): +(.+)", line)
         if match is None or match.group(1) in frontmatter:
             raise ValueError(f"{expected_name} SKILL.md has invalid frontmatter")
         frontmatter[match.group(1)] = match.group(2).strip()
@@ -67,12 +98,18 @@ def verify_skill_contract(skill: Path, expected_name: str) -> None:
         raise ValueError(f"{expected_name} frontmatter keys are not allowed by the skill contract")
     if "license" in frontmatter and not frontmatter["license"]:
         raise ValueError(f"{expected_name} frontmatter license is empty")
-    if "allowed-tools" in frontmatter and not frontmatter["allowed-tools"]:
-        raise ValueError(f"{expected_name} frontmatter allowed-tools is empty")
     if "metadata" in frontmatter:
+        if len(frontmatter["metadata"]) > MAX_METADATA_LENGTH:
+            raise ValueError(f"{expected_name} frontmatter metadata is too long")
         # metadata is a mapping in the spec; a bare scalar is not a valid value.
+        # parse_constant rejects NaN/Infinity, which JSON allows but YAML does not.
+        def _reject_constant(name: str) -> Any:
+            raise ValueError(f"{expected_name} frontmatter metadata has a non-JSON constant: {name}")
+
         try:
-            metadata_value = json.loads(frontmatter["metadata"])
+            metadata_value = json.loads(
+                frontmatter["metadata"], parse_constant=_reject_constant
+            )
         except json.JSONDecodeError as error:
             raise ValueError(
                 f"{expected_name} frontmatter metadata must be an inline JSON object"
@@ -150,16 +187,9 @@ def verify_suite(core: Path) -> dict[str, Any]:
         for path in skill_source.rglob("*"):
             # Local bytecode caches are development noise, never release content;
             # sibling skills outside public_skills are unrelated installations.
-            if not path.is_file() or "__pycache__" in path.parts:
+            if not path.is_file():
                 continue
-            # Dot-prefixed entries are editor, OS and tool noise (.DS_Store, swap
-            # files, lint caches). runtime-preflight only halts on extra
-            # executable content, so this noise must not stop the suite;
-            # update_suite_manifest applies the same rule so both agree.
-            if any(
-                part.startswith(".")
-                for part in path.relative_to(skill_source).parts
-            ):
+            if is_local_noise(path.relative_to(skill_source).parts):
                 continue
             child_relative = path.relative_to(skill_source).as_posix()
             relative = f"{name}/{child_relative}"

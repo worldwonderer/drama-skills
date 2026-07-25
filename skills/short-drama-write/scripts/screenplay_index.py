@@ -46,12 +46,17 @@ ASCII_DIALOGUE_RE = re.compile(
 TAG_RE = re.compile(r"^\[(?P<tag>VO|OS|SFX|画面文字|连续性|转场)\]\s*(?P<body>\S[\s\S]*)$")
 ANY_TAG_RE = re.compile(r"^\[(?P<tag>[^\]\r\n]+)\]")
 # Production dialects write tags with full-width brackets (【特写】/【闪回】).
-# Without this the paragraph matches nothing and is silently emitted as an
-# action block, so the owner never learns the source needs normalization.
-# The lookahead keeps dialect dialogue (【角色名】（括注）：台词) on the
-# dialogue path, where it is already reported as ambiguous.
+# Without this the paragraph matches nothing and is emitted as a plain action
+# block with no issue, so the owner never learns the source needs
+# normalization. The block is still emitted (see below) because block IDs are
+# the durable cross-artifact reference; only the diagnosis is added.
+# The lookahead keeps dialect dialogue on the dialogue path. The dialect writes
+# the performance cue with ASCII parens and a full-width colon
+# (【角色名】(表演括注)：台词, production-format-dialect.md), so both paren
+# styles must be exempted here.
 FULLWIDTH_TAG_RE = re.compile(
-    r"^【(?P<tag>[^】\r\n]+)】(?!\s*(?:（[^（）\r\n]*）)?\s*[：:])"
+    r"^【(?P<tag>[^】\r\n]+)】"
+    r"(?!\s*(?:（[^（）\r\n]*）|\([^()\r\n]*\))?\s*[：:])"
 )
 MALFORMED_TAG_RE = re.compile(r"^\[(?:VO|OS|SFX|画面文字|连续性|转场)(?:\s|：|:)")
 VOICE_TAG_BODY_RE = re.compile(r"^(?P<speaker>[^\s：（）:\[\]#]{1,40})：(?P<text>\S[\s\S]*)$")
@@ -330,10 +335,15 @@ def _parse_screenplay(
                 _issue(
                     span,
                     "unsupported_production_tag",
-                    f"生产方言标签 【{fullwidth_tag.group('tag')}】 使用全角括号；"
-                    f"先经规范化入口转为半角 [ ]，仅支持 {', '.join(SUPPORTED_TAGS)}。",
+                    f"【{fullwidth_tag.group('tag')}】 是生产方言写法，不是本套件的生产标签；"
+                    f"受支持的标签是半角 [ ] 加 {', '.join(SUPPORTED_TAGS)}。"
+                    "先经规范化入口判断它应当成为动作、画面文字还是转场，再发布。",
                 )
             )
+            # Still emit the block: this paragraph was an action block before
+            # the diagnosis existed, and dropping it would renumber every
+            # later block ID and break existing downstream references.
+            append_block("action", span, production=False)
             index = end_index + 1
             continue
 

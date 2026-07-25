@@ -498,5 +498,66 @@ class ScreenplayIndexTests(unittest.TestCase):
             )
 
 
+    def test_fullwidth_dialect_tag_is_diagnosed_without_dropping_its_block(self) -> None:
+        """The diagnosis must not renumber block IDs downstream artifacts cite."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "screenplay.md"
+            source.write_text(
+                "# EP001 测试\n\n"
+                "## EP001-SC001 内 · 会议室 · 日\n\n"
+                "【特写】墙上的钟停在三点。\n\n"
+                "角色甲：这是我的决定。\n",
+                encoding="utf-8",
+            )
+            output = root / "index.jsonl"
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), str(source),
+                 "--output", str(output), "--speaker", "角色甲"],
+                check=False, capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            rows = read_jsonl(output)
+            codes = [r["issue_code"] for r in rows if r["record_type"] == "source_issue"]
+            self.assertIn("unsupported_production_tag", codes)
+            # The paragraph still occupies a block, so later IDs keep their numbers.
+            self.assertEqual(
+                [row["kind"] for row in blocks(output)],
+                ["scene_heading", "action", "dialogue"],
+            )
+            self.assertEqual(
+                [row["block_id"] for row in blocks(output)][1:],
+                ["BLK-EP001-SC001-A01", "BLK-EP001-SC001-D01"],
+            )
+
+    def test_dialect_dialogue_is_not_mistaken_for_a_production_tag(self) -> None:
+        """production-format-dialect writes the cue with ASCII parens."""
+
+        for line in ("【萧尘渊】(目光坚定)：我不会退。", "【周野】（冷）：你来了。"):
+            with self.subTest(line=line), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "screenplay.md"
+                source.write_text(
+                    "# EP001 测试\n\n"
+                    "## EP001-SC001 内 · 会议室 · 日\n\n"
+                    f"{line}\n",
+                    encoding="utf-8",
+                )
+                output = root / "index.jsonl"
+                subprocess.run(
+                    [sys.executable, str(SCRIPT), str(source), "--output", str(output)],
+                    check=True, capture_output=True, text=True,
+                )
+                codes = [
+                    row["issue_code"]
+                    for row in read_jsonl(output)
+                    if row["record_type"] == "source_issue"
+                ]
+                self.assertIn("ambiguous_dialogue_or_action", codes)
+                self.assertNotIn("unsupported_production_tag", codes)
+
+
 if __name__ == "__main__":
     unittest.main()

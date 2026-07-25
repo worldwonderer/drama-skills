@@ -1,5 +1,6 @@
 import json
 import hashlib
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -7,11 +8,20 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 
 SUITE = Path(__file__).resolve().parents[1]
 VERIFY_TOOL = SUITE / "tools/verify_suite.py"
 UPDATE_TOOL = SUITE / "tools/update_suite_manifest.py"
+
+
+def import_module_from_path(name: str, path: Path) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def copy_installed_suite(destination: Path) -> Path:
@@ -396,10 +406,57 @@ class InstallationResolutionTests(unittest.TestCase):
                 frontmatter = skill_md.read_text(encoding="utf-8").split("---", 2)[1]
                 self.assertRegex(frontmatter, r"(?m)^license: MIT$")
 
-    def test_skill_contract_accepts_the_official_optional_frontmatter_keys(self) -> None:
-        """allowed-tools and metadata are spec-legal and must pass."""
+    def test_skill_contract_rejects_allowed_tools(self) -> None:
+        """allowed-tools grants tool access the declared trust boundary forbids."""
 
-        for extra in ('allowed-tools: Read, Grep', 'metadata: {"a":"b"}'):
+        with tempfile.TemporaryDirectory() as directory:
+            skills = copy_installed_suite(Path(directory))
+            skill_md = skills / "short-drama-write/SKILL.md"
+            skill_md.write_text(
+                skill_md.read_text(encoding="utf-8").replace(
+                    "---\n\n#", "allowed-tools: Bash, WebFetch\n---\n\n#", 1
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [sys.executable, str(UPDATE_TOOL), str(skills / "short-drama")],
+                check=True, capture_output=True, text=True,
+            )
+            completed = subprocess.run(
+                [sys.executable, str(VERIFY_TOOL), str(skills / "short-drama")],
+                check=False, capture_output=True, text=True,
+            )
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("frontmatter keys", completed.stderr)
+
+    def test_skill_contract_rejects_control_characters_in_frontmatter(self) -> None:
+        """splitlines() would split on characters YAML rejects."""
+
+        for smuggled in ("\x1c", "\x0b", " "):
+            with self.subTest(smuggled=repr(smuggled)), tempfile.TemporaryDirectory() as d:
+                skills = copy_installed_suite(Path(d))
+                skill_md = skills / "short-drama-write/SKILL.md"
+                skill_md.write_text(
+                    skill_md.read_text(encoding="utf-8").replace(
+                        "---\n\n#", f"x{smuggled}license: MIT\n---\n\n#", 1
+                    ),
+                    encoding="utf-8",
+                )
+                subprocess.run(
+                    [sys.executable, str(UPDATE_TOOL), str(skills / "short-drama")],
+                    check=True, capture_output=True, text=True,
+                )
+                completed = subprocess.run(
+                    [sys.executable, str(VERIFY_TOOL), str(skills / "short-drama")],
+                    check=False, capture_output=True, text=True,
+                )
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn("control characters", completed.stderr)
+
+    def test_skill_contract_accepts_the_official_optional_frontmatter_keys(self) -> None:
+        """metadata is spec-legal and must pass as an inline JSON object."""
+
+        for extra in ('metadata: {"a":"b"}',):
             with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
                 skills = copy_installed_suite(Path(directory))
                 skill_md = skills / "short-drama-write/SKILL.md"
@@ -451,6 +508,40 @@ class InstallationResolutionTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 2)
             self.assertIn("metadata must be an inline JSON object", completed.stderr)
+
+    def test_verifier_still_reports_extra_files_hidden_in_dot_paths(self) -> None:
+        """runtime-preflight promises to halt on extra executable content."""
+
+        for relative in (".hidden/payload.py", ".env", "scripts/.bootstrap.sh"):
+            with self.subTest(planted=relative), tempfile.TemporaryDirectory() as d:
+                skills = copy_installed_suite(Path(d))
+                planted = skills / "short-drama-storyboard" / relative
+                planted.parent.mkdir(parents=True, exist_ok=True)
+                planted.write_text("import os\n", encoding="utf-8")
+                completed = subprocess.run(
+                    [sys.executable, str(VERIFY_TOOL), str(skills / "short-drama")],
+                    check=False, capture_output=True, text=True,
+                )
+                self.assertEqual(completed.returncode, 2, completed.stdout)
+                self.assertIn("unexpected suite files", completed.stderr)
+
+    def test_generator_and_verifier_share_one_noise_definition(self) -> None:
+        """A divergence would make the published manifest unverifiable."""
+
+        generator = import_module_from_path("update_tool", UPDATE_TOOL)
+        verifier = import_module_from_path(
+            "shipped_verifier", SUITE / "skills/short-drama/scripts/suite_verify.py"
+        )
+        self.assertEqual(generator.NOISE_DIR_NAMES, verifier.NOISE_DIR_NAMES)
+        self.assertEqual(generator.NOISE_FILE_NAMES, verifier.NOISE_FILE_NAMES)
+        self.assertEqual(generator.NOISE_FILE_SUFFIXES, verifier.NOISE_FILE_SUFFIXES)
+        for parts in (
+            (".hidden", "payload.py"), (".env",), ("scripts", ".bootstrap.sh"),
+            (".DS_Store",), ("__pycache__", "x.pyc"), ("a.swp",),
+        ):
+            self.assertEqual(
+                generator.is_local_noise(parts), verifier.is_local_noise(parts), parts
+            )
 
     def test_manifest_generator_excludes_local_dot_noise(self) -> None:
         """A stray .DS_Store must never be baked into the published manifest."""

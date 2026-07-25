@@ -674,6 +674,80 @@ class PackageTests(unittest.TestCase):
             )
             self.assertEqual(manifest["text_exceptions"][0]["exact_text"], text)
 
+    def test_bare_path_marker_cannot_be_declared_as_an_exception(self) -> None:
+        """A marker alone would act as a wildcard over every path sharing it."""
+
+        markers = ["/Users" + "/", "/var" + "/", "/tmp" + "/", "C" + ":/", "C" + ":\\"]
+        for marker in markers:
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as directory:
+                root = self.make_approved_project(directory)
+                self.approve_artifact(
+                    root,
+                    artifact_id="EP001:script",
+                    owner="short-drama-write",
+                    outputs={
+                        "episodes/EP001/screenplay.md": (
+                            f"[画面文字] A：{marker}alpha/one.md\n\n"
+                            f"[画面文字] B：{marker}beta/secret.key\n"
+                        )
+                    },
+                )
+                with self.assertRaises(project_tool.PackageBlockedError):
+                    project_tool.build_delivery_package(
+                        root,
+                        episode="EP001",
+                        selected_paths=["episodes/EP001/screenplay.md"],
+                        text_exceptions=[
+                            {
+                                "exact_text": marker,
+                                "path": "episodes/EP001/screenplay.md",
+                                "field": "screenplay.visible_text",
+                                "purpose": "on_screen_text",
+                                "provenance": "story_world_authored",
+                                "text_policy": "fictional_interface_text",
+                                "allow_delivery": True,
+                            }
+                        ],
+                    )
+
+    def test_text_exception_only_applies_to_the_file_it_declares(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            shown = "/var" + "/log/auth.log"
+            self.approve_artifact(
+                root,
+                artifact_id="EP001:script",
+                owner="short-drama-write",
+                outputs={
+                    "episodes/EP001/screenplay.md": f"[画面文字] A：{shown}\n",
+                    "episodes/EP001/beats.jsonl": json.dumps(
+                        {"note": f"B：{shown}"}, ensure_ascii=False
+                    )
+                    + "\n",
+                },
+            )
+
+            with self.assertRaises(project_tool.PackageBlockedError):
+                project_tool.build_delivery_package(
+                    root,
+                    episode="EP001",
+                    selected_paths=[
+                        "episodes/EP001/screenplay.md",
+                        "episodes/EP001/beats.jsonl",
+                    ],
+                    text_exceptions=[
+                        {
+                            "exact_text": shown,
+                            "path": "episodes/EP001/screenplay.md",
+                            "field": "screenplay.visible_text",
+                            "purpose": "on_screen_text",
+                            "provenance": "story_world_authored",
+                            "text_policy": "fictional_interface_text",
+                            "allow_delivery": True,
+                        }
+                    ],
+                )
+
     def test_machine_path_exception_does_not_release_other_paths(self) -> None:
         """An exception releases only the exact string it declared."""
 
