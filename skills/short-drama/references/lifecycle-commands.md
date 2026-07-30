@@ -158,9 +158,16 @@ python3 <short-drama-skill-dir>/scripts/project_tool.py verify <project> --episo
 ```
 
 `package` 会写出 `checksums.sha256`，但在此之前没有任何命令再读它——交付目录被事后
-改动仍然"看起来已交付"。`verify` 重新计算每个已登记文件的 hash，并额外报告**未登记
-的新增文件**（校验和清单对它是盲的）。结果 `status` 为 `intact` 或 `tampered`，
-后者列出 `mismatched`、`missing`、`unlisted` 三类。
+改动仍然"看起来已交付"。结果 `status` 为 `intact` 或 `tampered`，后者由四个字段说明原因：
+
+| 字段 | 含义 |
+|---|---|
+| `checksum_list_authentic` | 校验和清单本身是否仍等于打包时记录在状态里的 hash。**能改产物的人同样能重算清单**，所以先验证清单，再信任其中任何一行；这一项单独为 `false` 时，其余三项可能全是空的 |
+| `mismatched` | 已登记文件的内容变了 |
+| `missing` | 已登记文件不在了，或被换成了符号链接（指向交付树之外的字节不予采信） |
+| `unlisted` | 交付目录里有清单上没有的文件或符号链接目录——**校验和清单对新增是盲的**，只核对已登记项永远发现不了它 |
+
+命令在 `tampered` 时退出码为 1，可以直接用在 `&&` 链或流水线闸门里。
 
 ### 完整性由工具枚举，取舍由创作者声明
 

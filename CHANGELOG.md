@@ -32,9 +32,9 @@
   从不报告它；任何技能都能发布任何别的技能的产物。现在根目录限于 `development`、
   `bible`、`episodes`、`creator-decisions`、`reviews`，确需别处的临时文件加
   `--allow-unregistered-path`——仍然可行，但不再是静默的。负责人约束只覆盖各
-  `SKILL.md` 已声明的产物名：`bible/` 是真正共享的（assets 拥有身份，develop 拥有系列
-  事实），一个分集目录里也住着四个技能的产物，按目录前缀反推负责人等于替契约回答它
-  从未回答的问题，会在没有授权的情况下拒掉合法的临时文件。
+  `SKILL.md` 已声明的产物名（含 `bible/` 的六份身份账本，负责人均为 `short-drama-assets`）：
+  一个分集目录里住着四个技能的产物，按目录前缀反推负责人等于替契约回答它从未回答的
+  问题，会在没有授权的情况下拒掉创作者合法放在旁边的临时文件。
 - **所有路径判断改为忽略大小写**。本套件在 macOS/Windows 的大小写不敏感文件系统上开发
   和运行，`Delivery/EP001/manifest.json` 与 `delivery/EP001/manifest.json` 是同一个
   文件；区分大小写的判断在那里等于没有判断。同一次修正也补上了此前就存在的 `Inputs/`
@@ -42,6 +42,13 @@
 - **`short-drama.json` 按文件名拦截，不只是根目录那一份**。`find_project` 向上查找，
   被放进子目录的同名文件会让该子目录冒充项目根，创作者在其中运行 `status` 会读到
   伪造的项目。
+- **`VID-04` 新增五个 `structural_invariant` 诊断码**（`VID_EXPLICIT_TIMING_SHORTFALL`、
+  `VID_EXPLICIT_TIMING_UNDECLARED_OVERLAP`、`VID_EXPLICIT_TIMING_UNPARSEABLE`、
+  `VID_DECLARED_TOTAL_MISMATCH`、`VID_DURATION_PROJECTION_STALE`）与
+  `VID_TIMING_MODE_INCONSISTENT`。此前只有超出方向有编码，不足方向的后果其实更重：
+  未分配的余量不会渲染成静止画面，执行端会用没有上游来源的动作把它填满。**记为变更**：
+  既有运动规格若把重叠关系写在 `phases` 散文里而没有置 `timing_plan.declares_overlap`，
+  现在会被判为未声明重叠而阻断，需要补上该字段。
 
 ### 新增
 
@@ -50,10 +57,10 @@
   **未登记的新增文件**——校验和清单对新增是盲的。
 - **`motion_timing_check.py`**（video-prompts）：`VID-04` 此前是被声明为
   `structural_invariant`、诊断码 `VID_EXPLICIT_TIMING_OVERFLOW` 也已分配、却没有任何
-  脚本读取 `motion-specs.jsonl` 的一条规则。新脚本做显式分段的算术核对，并补齐
-  `VID_EXPLICIT_TIMING_SHORTFALL` 等五个此前没有编码的方向；其中不足方向的后果更重，
-  未分配的余量会被执行端用无上游来源的动作填满。`relative` 计时不做算术断言，列在
-  `relative_plans` 中报告而不是判过。
+  脚本读取 `motion-specs.jsonl` 的一条规则。新脚本做显式分段的算术核对。超出按**终点**
+  判断、不足按**裁剪到镜头长度内的并集**判断，因为中间留空加尾部超出会互相抵消：
+  `0.0-2.0` 加 `3.0-5.0` 在 4 秒镜头上"合计正好 4 秒"，实际却同时发生了截断与留白。
+  `relative` 计时不做算术断言，列在 `relative_plans` 中报告而不是判过。
 
 ### 修复
 
@@ -82,6 +89,15 @@
 - `bible/*.jsonl` 仍没有记录级 schema：发布闸门只检查后缀、UTF-8 与可解析性，
   `{"a":1}` 与空文件都能发布进去。五个校验脚本也都没有接进 `publish` 闸门，
   只在智能体按提示词执行时才运行。
+- 结构化引用的守卫只收紧了 `hash`：`owner` 或 `artifact` 缺失时该引用仍被静默丢弃，
+  依赖边照样为零。这一条与 0.2.0 行为相同，不是本次引入的回归；收紧它同样属于
+  `structural_invariant` 收紧，需要单独记为变更。
+- `_relative_path` 不限制路径字符集：分量里含换行会让 `checksums.sha256` 一条产物写出
+  两行；Windows 语义下结尾的点或空格（`storyboard /shots.jsonl`）与规范拼写指向同一个
+  文件，却绕开负责人表。两者都需要给路径分量定一个字符集，属于跨命令的收紧。
+- `_project_path` 只校验解析后的父目录仍在项目内，不校验中途是否经过符号链接目录，
+  因此可发布根目录下的符号链接仍能把写入重定向进 `inputs/` 或 `.short-drama/`。
+  该行为在 0.2.0 已存在。
 
 ## [0.2.0] - 2026-07-27
 

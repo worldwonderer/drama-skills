@@ -99,7 +99,7 @@
     "short-drama-video-prompts/references/review-and-fixtures.md": "94287e5ede3e7319a42042b66b39417c931163ac3b73853e3ead37bf1aed5034",
     "short-drama-video-prompts/references/stage-contract.md": "86af640b4d95c3c813393e9c22a00c62d23707d6ba6263f94cddb5a786fb2e1a",
     "short-drama-video-prompts/scripts/container_check.py": "ac4df67ef1ff745eddb6563e90d35345730b275402928ce1d5393f84e822c56b",
-    "short-drama-video-prompts/scripts/motion_timing_check.py": "56957e5179e802d83bdeeb25560138e668991b7d244e4adeaa73bc46611b6301",
+    "short-drama-video-prompts/scripts/motion_timing_check.py": "c46b10b7873e17a275fcabb1e7b006e61a388e079123cd012ed138b974b7aa3f",
     "short-drama-write/SKILL.md": "1787a5f621c75dc075ecb0c7e67874d64db596df91e7ecb834d841da10ced0e3",
     "short-drama-write/agents/openai.yaml": "9fa641b6cb5ed864467ed6fd3ad3dfe92324ae69a5d28884c7f538be74d529bd",
     "short-drama-write/assets/beats.jsonl": "e5b123ba6a802e239b43aa9052c216db771207aa7b67b8b0b99b32248741c191",
@@ -130,12 +130,12 @@
     "short-drama/references/form-cards/水墨笔触.md": "16da548a4376cac4a947318f165025ef5dca0ad3570fdcd9cefbab72f852a07a",
     "short-drama/references/form-cards/风格化三维.md": "7fa618d61f7061f72344ab5f4d99235dd9e9b2bc9321fa61d8d1fd3cb3ec4e66",
     "short-drama/references/knowhow-index.md": "ce6f2ef0c79d018adec99a44d80d529db0dc7a3fc8fb4137d923097e71d62f85",
-    "short-drama/references/lifecycle-commands.md": "0cfcf6de5356c945e0b2da7d5cb795361f6d9c24f5d5f12dc63669bc46ead60a",
+    "short-drama/references/lifecycle-commands.md": "fc6f471f300325ca0cd0b47748ddc50e815334c7d04dd86e459f1513c4c6b457",
     "short-drama/references/production-form-profiles.md": "e222d56ea54c3fd8cd4a5f1f3f733aecc870a7b276499b617ef68dc3d117502e",
     "short-drama/references/reference-media-and-pickups.md": "8b800e82bf5fa975d78be1cc56aaa185fdcec4c38ab62ee1aecdefd7a548864e",
     "short-drama/references/routing-examples.md": "47bf4e9f614c0f8417f8be279e45ba41402d3b01e748db49ffaf574b5a583c74",
     "short-drama/references/runtime-preflight.md": "fa58f28e0348422f6be781eaad5d1fd0e4908dac02c99d2928452f1146f10c61",
-    "short-drama/scripts/project_tool.py": "9b89a523afcea88c5f20854bec00d7159f45a30db111dba0fa46bfb36aa35fb4",
+    "short-drama/scripts/project_tool.py": "b73765f98d725db1bff9ff8c7642f89752b6012047955a9d3af4b9c9dba8af30",
     "short-drama/scripts/suite_verify.py": "2c1d871e10b218da3d433fbc201950a63b4be9bb456672fab15d5b289d7eb69b"
   },
   "public_skills": [

@@ -431,6 +431,13 @@ class ValidatorRegistrationTests(unittest.TestCase):
             "short-drama-video-prompts": "scripts/container_check.py",
             "short-drama-write": "scripts/voice_sheet_check.py",
         }
+        pairs_extra = {
+            "short-drama-video-prompts": "scripts/motion_timing_check.py",
+        }
+        for skill, script in pairs_extra.items():
+            with self.subTest(skill=skill, script=script):
+                body = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
+                self.assertIn(script, body)
         for skill, script in pairs.items():
             with self.subTest(skill=skill):
                 body = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
@@ -444,6 +451,7 @@ class ValidatorRegistrationTests(unittest.TestCase):
         for skill, script in (
             ("short-drama-storyboard", "scripts/storyboard_check.py"),
             ("short-drama-video-prompts", "scripts/container_check.py"),
+            ("short-drama-video-prompts", "scripts/motion_timing_check.py"),
             ("short-drama-write", "scripts/voice_sheet_check.py"),
         ):
             body = (SKILLS / skill / script).read_text(encoding="utf-8")

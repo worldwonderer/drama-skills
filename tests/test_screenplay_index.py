@@ -559,10 +559,6 @@ class ScreenplayIndexTests(unittest.TestCase):
                 self.assertNotIn("unsupported_production_tag", codes)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class EpisodeIdentifierAgreementTests(unittest.TestCase):
     """The screenplay heading and the project directory must admit one spelling.
 
@@ -621,3 +617,6 @@ class EpisodeIdentifierAgreementTests(unittest.TestCase):
                 "## EP001-SC001 内 · 房间 · 日"
             )
         )
+
+if __name__ == "__main__":
+    unittest.main()

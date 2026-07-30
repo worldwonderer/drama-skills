@@ -677,6 +677,56 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(tampered.returncode, 1, msg=tampered.stdout)
             self.assertEqual(json.loads(tampered.stdout)["status"], "tampered")
 
+    def test_verify_sees_content_hidden_behind_a_symlinked_directory(self) -> None:
+        # `rglob` does not descend into a symlinked directory and `is_file()`
+        # resolves the link away, so one `ln -s` smuggled a whole subtree past
+        # the delivery gate, the privacy scan, creator acceptance and
+        # independent review into a tree this command certified as intact.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            project_tool.build_delivery_package(
+                root,
+                episode="EP001",
+                selected_paths=[
+                    "episodes/EP001/screenplay.md",
+                    "episodes/EP001/assets/image-prompt-specs.jsonl",
+                ],
+            )
+            outside = Path(directory) / "outside"
+            outside.mkdir()
+            (outside / "private-notes.md").write_text("非公开备注\n", encoding="utf-8")
+            (root / "delivery/EP001/extras").symlink_to(outside, target_is_directory=True)
+
+            result = project_tool.verify_delivery_package(root, episode="EP001")
+
+            self.assertEqual(result["status"], "tampered")
+            self.assertEqual(result["unlisted"], ["extras"])
+
+    def test_verify_refuses_to_hash_through_a_symlinked_listed_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            project_tool.build_delivery_package(
+                root,
+                episode="EP001",
+                selected_paths=[
+                    "episodes/EP001/screenplay.md",
+                    "episodes/EP001/assets/image-prompt-specs.jsonl",
+                ],
+            )
+            listed = "artifacts/episodes/EP001/screenplay.md"
+            target = root / "delivery/EP001" / listed
+            elsewhere = Path(directory) / "elsewhere.md"
+            elsewhere.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+            target.unlink()
+            target.symlink_to(elsewhere)
+
+            result = project_tool.verify_delivery_package(root, episode="EP001")
+
+            # Byte-identical through the link, and still refused: the bytes
+            # live outside the delivered tree.
+            self.assertEqual(result["missing"], [listed])
+            self.assertEqual(result["status"], "tampered")
+
     def test_verify_refuses_an_episode_that_was_never_delivered(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = self.make_approved_project(directory)

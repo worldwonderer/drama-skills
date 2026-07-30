@@ -118,6 +118,41 @@ class MotionTimingCheckTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "pass")
 
+    def test_an_enclosing_segment_still_reports_its_overrun(self) -> None:
+        # Sorting (start, end) orders by start, so the latest-starting segment
+        # can end deep inside an earlier one that encloses it. Reading the
+        # overrun off that tuple missed the overflow entirely, and the clipped
+        # union is full here so the shortfall branch stays silent too — the
+        # plan reported clean while running 1s past the accepted end.
+        result = self.check(
+            [
+                spec(
+                    "M-1",
+                    "SHOT-1",
+                    ["0.0-5.0", "0.5-1.5", "2.0-3.0"],
+                    declares_overlap=True,
+                )
+            ]
+        )
+
+        self.assertEqual(codes(result), ["VID_EXPLICIT_TIMING_OVERFLOW"])
+        self.assertAlmostEqual(result["findings"][0]["endpoint_seconds"], 5.0)
+        self.assertAlmostEqual(result["findings"][0]["overflow_seconds"], 1.0)
+
+    def test_union_length_counts_a_nested_interval_once(self) -> None:
+        # Pins _union_length against a plain sum, which agrees with it on every
+        # other case in this file.
+        self.assertAlmostEqual(
+            motion_timing_check._union_length([(0.0, 5.0), (1.0, 2.0)]), 5.0
+        )
+        self.assertAlmostEqual(
+            motion_timing_check._union_length([(0.0, 1.0), (1.0, 2.0)]), 2.0
+        )
+        self.assertAlmostEqual(
+            motion_timing_check._union_length([(0.0, 1.0), (3.0, 4.0)]), 2.0
+        )
+        self.assertAlmostEqual(motion_timing_check._union_length([]), 0.0)
+
     def test_a_relative_plan_carrying_explicit_segments_is_a_contradiction(
         self,
     ) -> None:

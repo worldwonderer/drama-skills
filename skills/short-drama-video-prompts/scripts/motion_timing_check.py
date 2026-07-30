@@ -296,7 +296,13 @@ def check(
         # unsourced motion). Overflow is therefore read off the endpoint, and
         # shortfall off the union clipped to the shot.
         covered = _union_length(ordered)
-        last_end = ordered[-1][1] if ordered else 0.0
+        # max(), not ordered[-1][1]: sorting (start, end) tuples orders by
+        # start, so the last element is the latest-starting segment, whose end
+        # can sit well inside an earlier segment that encloses it. A sustained
+        # motion spanning the shot with beats inside it — exactly what
+        # motion-recipe.md tells creators to mark `declares_overlap` — would
+        # otherwise have its overrun read off one of the inner beats.
+        last_end = max((end for _, end in ordered), default=0.0)
         inside = _union_length(
             [
                 (max(start, 0.0), min(end, duration))

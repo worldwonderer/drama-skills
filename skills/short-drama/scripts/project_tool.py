@@ -3018,16 +3018,29 @@ def verify_delivery_package(path: Path, *, episode: str) -> dict[str, Any]:
     missing: list[str] = []
     for relative, digest in sorted(expected.items()):
         target = delivery / relative
-        if not target.is_file():
+        # A listed path replaced by a symlink is reported rather than hashed
+        # through: `package` never emits one, and following it would certify
+        # bytes that live outside the delivered tree.
+        if target.is_symlink() or not target.is_file():
             missing.append(relative)
         elif sha256_file(target) != digest:
             mismatched.append(relative)
 
-    present = {
-        str(item.relative_to(delivery).as_posix())
-        for item in delivery.rglob("*")
-        if item.is_file()
-    }
+    # os.walk with followlinks=False, not rglob: `rglob` does not descend into
+    # a symlinked directory, and `is_file()` resolves the link itself away, so
+    # `ln -s ../../elsewhere extras` hid an entire subtree from the one check
+    # this command advertises. Every other path handler in this file already
+    # refuses symlinks; this was the gap.
+    present: set[str] = set()
+    for parent, directories, names in os.walk(delivery, followlinks=False):
+        base = Path(parent)
+        for name in list(directories):
+            if (base / name).is_symlink():
+                # Reported as an entry in its own right; not descended into.
+                directories.remove(name)
+                present.add((base / name).relative_to(delivery).as_posix())
+        for name in names:
+            present.add((base / name).relative_to(delivery).as_posix())
     unlisted = sorted(present - set(expected) - {"checksums.sha256"})
 
     intact = checksum_list_authentic and not (mismatched or missing or unlisted)
