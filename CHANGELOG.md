@@ -42,7 +42,7 @@
 - **`short-drama.json` 按文件名拦截，不只是根目录那一份**。`find_project` 向上查找，
   被放进子目录的同名文件会让该子目录冒充项目根，创作者在其中运行 `status` 会读到
   伪造的项目。
-- **`VID-04` 新增五个 `structural_invariant` 诊断码**（`VID_EXPLICIT_TIMING_SHORTFALL`、
+- **`VID-04` 新增六个 `structural_invariant` 诊断码**（`VID_EXPLICIT_TIMING_SHORTFALL`、
   `VID_EXPLICIT_TIMING_UNDECLARED_OVERLAP`、`VID_EXPLICIT_TIMING_UNPARSEABLE`、
   `VID_DECLARED_TOTAL_MISMATCH`、`VID_DURATION_PROJECTION_STALE`）与
   `VID_TIMING_MODE_INCONSISTENT`。此前只有超出方向有编码，不足方向的后果其实更重：
@@ -70,6 +70,9 @@
   成为 `EP001` 的第二种拼写，而完整性闸门按前缀枚举，另一种拼写下的产物会被静默跳过。
 - 文档中 `episodes/EPxxx/`、`episodes/EPX/` 两种写法会被读成字面 ID，现统一为
   `episodes/<EP>/`。
+- **集号与场次号收紧为 ASCII 数字**。此前用的 `\d` 是 Unicode 数字类，`# EP００１`
+  能解析通过，于是全角与半角写法在 `BLK-` 身份命名空间里成为同一场景的两种拼写。
+  既有全角稿件现在会报 `invalid_episode_heading`，改成半角数字即可。
 
 ### 升级既有项目
 
@@ -77,15 +80,16 @@
 未完成的事务卡住：`recover` 照常回滚或前滚。
 
 若项目里已有 `episodes/ep1/` 这类旧目录，其中的产物仍可 `accept`，但不能再发布新版本，
-也不能打包交付。迁移方式是把内容按 `episodes/EP001/` 重新发布一次并重新接受；旧路径的
-状态记录会因不再有已接受负责人而退出交付枚举，磁盘上的旧文件不会被自动删除，确认新版本
-无误后再自行清理。
+也不能打包交付。迁移方式是把内容按 `episodes/EP001/` 重新发布一次并重新接受。交付枚举
+按 `episodes/<EP>/` 前缀匹配，与负责人无关，所以旧路径本来就不在 `EP001` 的清点范围内，
+不需要额外处理；磁盘上的旧文件不会被自动删除，确认新版本无误后自行清理。
 
 ### 已知缺口
 
-- 声明为 `structural_invariant` 的规则共 24 条，本次之后约 10 条有可执行检查。其余
-  多数需要语义判断（例如 `VID-08` 的"本镜确切演员/动作/接触"），把它们改判为
-  `reviewed_invariant` 是契约层的取舍，应由维护者按逐条证据决定，不在本次一并改。
+- 声明为 `structural_invariant` 的规则共 24 条，其中能在脚本里追溯到规则编号的是
+  `SHT-16`、`SHT-17`、`VID-15` 与本次新增的 `VID-04`，共 4 条。其余多数需要语义判断
+  （例如 `VID-08` 的"本镜确切演员/动作/接触"），把它们改判为 `reviewed_invariant`
+  是契约层的取舍，应由维护者按逐条证据决定，不在本次一并改。
 - `bible/*.jsonl` 仍没有记录级 schema：发布闸门只检查后缀、UTF-8 与可解析性，
   `{"a":1}` 与空文件都能发布进去。五个校验脚本也都没有接进 `publish` 闸门，
   只在智能体按提示词执行时才运行。
@@ -95,6 +99,11 @@
 - `_relative_path` 不限制路径字符集：分量里含换行会让 `checksums.sha256` 一条产物写出
   两行；Windows 语义下结尾的点或空格（`storyboard /shots.jsonl`）与规范拼写指向同一个
   文件，却绕开负责人表。两者都需要给路径分量定一个字符集，属于跨命令的收紧。
+- `verify` 的 `checksum_list_authentic` 用的是同一棵树内的第二个锚点
+  （`.short-drama/state.json` 里记录的 hash）。把产物、校验和清单与状态文件一起改仍能
+  得到 `intact`；要防这一类需要把 hash 留在项目之外，属于交付流程而非本工具的范围。
+- `verify` 的 `os.walk` 没有 `onerror`：不可读的子目录会被静默跳过，其中的文件不进
+  `unlisted`。该行为在本次新增的枚举与此前的 `rglob` 写法下相同。
 - `_project_path` 只校验解析后的父目录仍在项目内，不校验中途是否经过符号链接目录，
   因此可发布根目录下的符号链接仍能把写入重定向进 `inputs/` 或 `.short-drama/`。
   该行为在 0.2.0 已存在。

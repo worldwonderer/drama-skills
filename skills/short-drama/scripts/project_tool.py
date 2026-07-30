@@ -2985,8 +2985,10 @@ def verify_delivery_package(path: Path, *, episode: str) -> dict[str, Any]:
     # Authenticate the checksum file itself before trusting a single line of
     # it. Anyone who can edit a delivered artifact can also recompute the list
     # to match, which would make this command report `intact` on exactly the
-    # tampering it exists to catch. The independent anchor is the accepted
-    # hash recorded in project state when `package` published the tree.
+    # tampering it exists to catch. The anchor is the accepted hash recorded in
+    # project state when `package` published the tree — a second location in
+    # the same tree, not an independent one: editing state alongside the list
+    # defeats it. Detecting that needs a hash kept outside the project.
     checksums_relative = f"delivery/{episode}/checksums.sha256"
     state = _read_state(root)
     artifacts = state.get("artifacts")
