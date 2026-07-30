@@ -561,3 +561,63 @@ class ScreenplayIndexTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EpisodeIdentifierAgreementTests(unittest.TestCase):
+    """The screenplay heading and the project directory must admit one spelling.
+
+    They diverged once already: the lifecycle tool accepted `EP[0-9]{3,}` while
+    the indexer required exactly three digits, so `EP1000` was a legal
+    directory and an illegal heading. Nothing asserted they agreed, so the
+    divergence was invisible until someone shipped a 1000-episode series.
+    """
+
+    def project_tool(self):
+        import importlib.util
+
+        script = SUITE / "skills/short-drama/scripts/project_tool.py"
+        spec = importlib.util.spec_from_file_location("pt_for_ep_agreement", script)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_both_enforcers_accept_and_reject_the_same_episode_ids(self) -> None:
+        episode_re = self.project_tool().EPISODE_ID_RE
+        for candidate, legal in [
+            ("EP001", True),
+            ("EP999", True),
+            ("EP1000", True),
+            ("EP12345", True),
+            ("EP0001", False),
+            ("EP1", False),
+            ("ep001", False),
+            ("EP01", False),
+            ("EPabc", False),
+        ]:
+            with self.subTest(candidate=candidate):
+                heading = screenplay_index.EPISODE_HEADING_RE.fullmatch(f"# {candidate}")
+                self.assertEqual(
+                    heading is not None,
+                    legal,
+                    msg=f"heading grammar disagrees on {candidate}",
+                )
+                self.assertEqual(
+                    episode_re.fullmatch(candidate) is not None,
+                    legal,
+                    msg=f"lifecycle path rule disagrees on {candidate}",
+                )
+
+    def test_scene_ids_do_not_admit_full_width_digits(self) -> None:
+        # `\d` is Unicode-aware, so EP001-SC００１ and EP001-SC001 would be two
+        # spellings of one scene inside the durable BLK- identity namespace.
+        self.assertIsNone(
+            screenplay_index.SCENE_HEADING_RE.fullmatch(
+                "## EP001-SC００１ 内 · 房间 · 日"
+            )
+        )
+        self.assertIsNotNone(
+            screenplay_index.SCENE_HEADING_RE.fullmatch(
+                "## EP001-SC001 内 · 房间 · 日"
+            )
+        )

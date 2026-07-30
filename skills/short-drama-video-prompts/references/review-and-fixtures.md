@@ -40,6 +40,12 @@ Finding 必须含 artifact/hash、引用片段、影响、required fix、owner�
 |---|---|---|---|---|---|
 | VID_SOURCE_REF_UNRESOLVED | structural_invariant | validator | error | video-prompts | shot/keyframe/dialogue/audio ref 未解析 |
 | VID_EXPLICIT_TIMING_OVERFLOW | structural_invariant | validator | error | video-prompts | 显式时间终点/非重叠总量超 duration |
+| VID_EXPLICIT_TIMING_SHORTFALL | structural_invariant | validator | error | video-prompts | 裁剪到镜头长度内的分段并集短于 duration；开头留空、中间留空与结尾留空都算，余量会被无来源动作填满 |
+| VID_TIMING_MODE_INCONSISTENT | structural_invariant | validator | error | video-prompts | `timing_plan.mode` 写 `relative` 却有分段标 `explicit`，两种计时同时声明 |
+| VID_EXPLICIT_TIMING_UNDECLARED_OVERLAP | structural_invariant | validator | error | video-prompts | 分段区间重叠但未声明重叠关系，合计无法判定 |
+| VID_EXPLICIT_TIMING_UNPARSEABLE | structural_invariant | validator | error | video-prompts | 声明 explicit 却没有可读秒区间，无法做 VID-04 算术 |
+| VID_DECLARED_TOTAL_MISMATCH | structural_invariant | validator | error | video-prompts | `declared_total_or_endpoint_seconds` 与分段实际覆盖不一致 |
+| VID_DURATION_PROJECTION_STALE | structural_invariant | validator | error | video-prompts | `boundary_refs.duration.value_seconds` 与镜头已接受时长不一致 |
 | VID_CAMERA_INTERVAL_CONFLICT | structural_invariant | validator | error | video-prompts | 同一区间 lock 与 move 等显式冲突 |
 | VID_END_REPORT_MISMATCH | structural_invariant | validator | error | video-prompts | reported end 不等于 storyboard continuity out |
 | VID_BOUNDARY_OVERRIDE | structural_invariant | validator | error | video-prompts | motion 写入 duration/end/next-shot override |

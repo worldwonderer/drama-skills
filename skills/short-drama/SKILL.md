@@ -92,6 +92,7 @@ reviewer 对新 hash 做 re-review；任何无法取得独立上下文的环节�
 | `accept` | 用创作者决定记录接受准确的 `candidate` 目标 |
 | `review` | 用独立审查结论更新校验与审查状态 |
 | `package` | 复验五轴、依赖和证据后生成文本交付包 |
+| `verify` | 用交付包自带的校验和复核它，并报告未登记的新增文件 |
 
 只有实际调用这些命令、诊断失败或核对记录格式时，才读取
 [lifecycle-commands.md](references/lifecycle-commands.md) 中的完整调用示例、预写日志、接受、

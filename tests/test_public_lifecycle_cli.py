@@ -416,6 +416,263 @@ class PublicLifecycleCliTests(unittest.TestCase):
                 {upstream_path: upstream[upstream_path]},
             )
 
+    def test_publish_rejects_unfilled_structured_ref_placeholder(self) -> None:
+        # A candidate copied straight from a shipped template used to publish
+        # cleanly while contributing zero dependency edges, so the exact-input
+        # cross-check never ran on it.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            content = (
+                json.dumps(
+                    {
+                        "source_ref": {
+                            "owner": "short-drama-write",
+                            "artifact": "episodes/EP001/screenplay.md",
+                            "hash": "<sha256>",
+                        }
+                    }
+                )
+                + "\n"
+            )
+            with self.assertRaisesRegex(ValueError, "structured ref hash is unfilled"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="EP001:shots",
+                    owner="short-drama-storyboard",
+                    outputs={"episodes/EP001/storyboard/shots.jsonl": content},
+                )
+
+    def test_publish_rejects_verbatim_shipped_shot_template(self) -> None:
+        template = (
+            SUITE / "skills/short-drama-storyboard/assets/shot-template.jsonl"
+        ).read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            with self.assertRaisesRegex(ValueError, "structured ref hash is unfilled"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="EP001:shots",
+                    owner="short-drama-storyboard",
+                    outputs={"episodes/EP001/storyboard/shots.jsonl": template},
+                )
+
+    def test_publish_cannot_overwrite_creator_authority_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            before = (root / "short-drama.json").read_bytes()
+            with self.assertRaisesRegex(ValueError, "creator authority file"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="EP001:script",
+                    owner="short-drama-write",
+                    outputs={"short-drama.json": '{"schema_version":1}\n'},
+                )
+            self.assertEqual((root / "short-drama.json").read_bytes(), before)
+
+    def test_publish_cannot_write_into_delivery_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            with self.assertRaisesRegex(ValueError, "written by the packaging gate"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="EP001:script",
+                    owner="short-drama-write",
+                    outputs={"delivery/EP001/manifest.json": '{"forged":true}\n'},
+                )
+
+    def test_publish_guards_are_case_insensitive(self) -> None:
+        # Developed and largely run on case-insensitive filesystems, where
+        # Delivery/x and delivery/x are the same file on disk. A case-sensitive
+        # guard is not a guard there.
+        cases = [
+            ("Short-Drama.json", "creator authority file"),
+            ("Delivery/EP001/manifest.json", "packaging gate"),
+            ("Inputs/source.md", "immutable publication sources"),
+            (".Short-Drama/state.json", "operational state"),
+            ("Episodes/ep1/screenplay.md", "EP001-style identifier"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            for index, (target, message) in enumerate(cases):
+                with self.subTest(target=target):
+                    with self.assertRaisesRegex(ValueError, message):
+                        project_tool.publish_candidate(
+                            root,
+                            artifact_id=f"case-{index}",
+                            owner="short-drama-write",
+                            outputs={target: "x\n"},
+                        )
+
+    def test_ownership_is_enforced_case_insensitively(self) -> None:
+        # The layout guards casefold; an ownership check that did not would let
+        # `Episodes/EP001/screenplay.md` through and, on a case-insensitive
+        # filesystem, overwrite the artifact the check exists to protect.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            for target in (
+                "Episodes/EP001/screenplay.md",
+                "episodes/EP001/Screenplay.md",
+                "Development/creative-brief.md",
+            ):
+                with self.subTest(target=target):
+                    with self.assertRaisesRegex(ValueError, "owns"):
+                        project_tool.publish_candidate(
+                            root,
+                            artifact_id="case-owner",
+                            owner="short-drama-storyboard",
+                            outputs={target: "# x\n"},
+                        )
+
+    def test_bible_ledgers_have_a_declared_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            with self.assertRaisesRegex(
+                ValueError, "short-drama-assets owns bible/characters.jsonl"
+            ):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="bible:chars",
+                    owner="short-drama-storyboard",
+                    outputs={"bible/characters.jsonl": '{"id":"C1"}\n'},
+                )
+
+    def test_publish_refuses_a_non_string_structured_ref_hash(self) -> None:
+        # `hash: null` was the same silent drop as `<sha256>` under a spelling
+        # the first fix did not cover.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            for digest in (None, 123):
+                with self.subTest(hash=digest):
+                    content = (
+                        json.dumps(
+                            {
+                                "source_ref": {
+                                    "owner": "short-drama-write",
+                                    "artifact": "episodes/EP001/screenplay.md",
+                                    "hash": digest,
+                                }
+                            }
+                        )
+                        + "\n"
+                    )
+                    with self.assertRaisesRegex(
+                        ValueError, "structured ref hash is unfilled"
+                    ):
+                        project_tool.publish_candidate(
+                            root,
+                            artifact_id="EP001:shots",
+                            owner="short-drama-storyboard",
+                            outputs={
+                                "episodes/EP001/storyboard/shots.jsonl": content
+                            },
+                        )
+
+    def test_publish_refuses_a_nested_project_file_decoy(self) -> None:
+        # find_project walks upward, so a planted development/short-drama.json
+        # makes that subdirectory answer as its own project root and a creator
+        # running `status` from inside it reads the decoy.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            with self.assertRaisesRegex(ValueError, "creator authority file"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="decoy",
+                    owner="short-drama-develop",
+                    outputs={"development/short-drama.json": '{"schema_version":1}\n'},
+                )
+
+    def test_publish_refuses_an_unregistered_root_unless_asked(self) -> None:
+        # The mistyped-directory case: `epsiodes/` used to commit and build a
+        # parallel tree that `status` never reports.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            with self.assertRaisesRegex(ValueError, "not a project stage directory"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="EP001:script",
+                    owner="short-drama-write",
+                    outputs={"epsiodes/EP001/screenplay.md": "# EP001\n"},
+                )
+            self.assertFalse((root / "epsiodes").exists())
+            project_tool.publish_candidate(
+                root,
+                artifact_id="EP001:notes",
+                owner="short-drama-write",
+                outputs={"scratch/notes.md": "# notes\n"},
+                allow_unregistered_path=True,
+            )
+            self.assertTrue((root / "scratch/notes.md").is_file())
+
+    def test_publish_enforces_declared_artifact_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            with self.assertRaisesRegex(
+                ValueError, "short-drama-write owns episodes/EP001/screenplay.md"
+            ):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="EP001:script",
+                    owner="short-drama-storyboard",
+                    outputs={"episodes/EP001/screenplay.md": "# EP001\n"},
+                )
+            # Undeclared paths inside a stage root stay owner-unconstrained:
+            # the contract names an owner for its own artifacts, not for every
+            # file a creator might place there.
+            project_tool.publish_candidate(
+                root,
+                artifact_id="EP001:scratch",
+                owner="short-drama-storyboard",
+                outputs={"episodes/EP001/scratch.json": '{"a":1}\n'},
+            )
+
+    def test_episode_identifier_has_exactly_one_spelling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            # EP0001 would be a second, coverage-invisible spelling of EP001.
+            with self.assertRaisesRegex(ValueError, "EP001-style identifier"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="pad",
+                    owner="short-drama-write",
+                    outputs={"episodes/EP0001/screenplay.md": "# EP0001\n"},
+                )
+            # Beyond EP999 the unpadded form is the only one available.
+            project_tool.publish_candidate(
+                root,
+                artifact_id="long-series",
+                owner="short-drama-write",
+                outputs={"episodes/EP1000/screenplay.md": "# EP1000\n"},
+            )
+
+    def test_publish_refuses_a_file_directly_under_episodes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            with self.assertRaisesRegex(ValueError, "episode artifacts live in"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="stray",
+                    owner="short-drama-write",
+                    outputs={"episodes/index.md": "# index\n"},
+                )
+
+    def test_publish_rejects_malformed_episode_directory(self) -> None:
+        # episodes/ep1/ used to publish fine and then be skipped by the
+        # package completeness gate's prefix match, so the gate passed on an
+        # episode whose artifacts it had never enumerated.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            for bad in ("episodes/ep1/screenplay.md", "episodes/EP1/screenplay.md"):
+                with self.subTest(path=bad):
+                    with self.assertRaisesRegex(ValueError, "EP001-style identifier"):
+                        project_tool.publish_candidate(
+                            root,
+                            artifact_id="EP001:script",
+                            owner="short-drama-write",
+                            outputs={bad: "# EP001\n"},
+                        )
+            self.assertFalse((root / "episodes/ep1").exists())
+            self.assertFalse((root / "episodes/EP1").exists())
+
     def test_publish_validates_same_publication_structured_ref_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = self.make_project(directory)

@@ -172,10 +172,10 @@ python3 <skill-dir>/scripts/voice_sheet_check.py episodes/EP001/voice-record-she
 
 本技能只拥有：
 
-- `episodes/EPxxx/episode-card.json`（上游 pointer + write execution，或显式
+- `episodes/<EP>/episode-card.json`（上游 pointer + write execution，或显式
   `write_standalone` 契约；二者不并存）
-- `episodes/EPxxx/beats.jsonl`
-- `episodes/EPxxx/screenplay.md`
+- `episodes/<EP>/beats.jsonl`
+- `episodes/<EP>/screenplay.md`
 - 由剧本生成的 `screenplay-index.jsonl`
 - 规范化预览与语义修订差异
 

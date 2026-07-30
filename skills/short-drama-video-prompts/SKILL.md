@@ -117,6 +117,20 @@ python3 <skill-dir>/scripts/container_check.py \
 未装容器的散镜是合法的，脚本只报告不判错；时长尚未确定的镜头列在 `unmeasured_shots`
 并排除在总和之外，这样"还没做完"不会被当成"做错了"。
 
+若 `timing_plan` 写的是显式秒段，再用
+[motion_timing_check.py](scripts/motion_timing_check.py) 核 `VID-04` 的算术：
+
+```bash
+python3 <skill-dir>/scripts/motion_timing_check.py \
+  episodes/EP001/storyboard/motion-specs.jsonl \
+  --shots episodes/EP001/storyboard/shots.jsonl
+```
+
+超出与不足都算违约，且不足的后果更重：未分配的余量不会渲染成静止画面，执行端会用
+没有上游来源的动作、表情或运镜把它填满。脚本还会报未声明的区间重叠、`declared_total`
+与实际覆盖不一致，以及 `boundary_refs.duration` 相对镜头已接受时长过期。
+`relative` 计时不做算术断言，列在 `relative_plans` 里报告而不是判过。
+
 若当前版本是局部补拍或替代实现，在 `coverage_scope` 标明 `master | pickup |
 alternate`，用同一文件内稳定的运动记录 ID 说明母版和补充关系；每项原文要求都要对应到
 当前运动字段或说明去向。补拍默认只补充、不替代母版；运动规格只能提出替代请求，

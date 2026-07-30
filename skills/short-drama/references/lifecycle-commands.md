@@ -5,7 +5,7 @@
 1. 发布与创作者确认
 2. 独立审查记录
 3. 过期影响与依赖检查（含把共享文件的失效半径收窄到记录）
-4. 恢复与打包（含交付完整性枚举）
+4. 恢复与打包（含交付完整性枚举与交付后复核）
 
 只在实际调用 `project_tool.py`、诊断命令失败或核对审核记录时读取本文。
 从 `short-drama` 技能安装目录调用脚本，不依赖当前工作目录：
@@ -18,6 +18,7 @@ python3 <short-drama-skill-dir>/scripts/project_tool.py publish <project> --owne
 python3 <short-drama-skill-dir>/scripts/project_tool.py accept <project> --artifact-id EP001:script --decision accepted --target episodes/EP001/screenplay.md=<candidate-sha256> --evidence-artifact creator-decisions/EP001-script.json --evidence-hash <decision-file-sha256> --evidence-record-id <decision-id>
 python3 <short-drama-skill-dir>/scripts/project_tool.py review <project> --artifact-id EP001:script --verdict approve --target episodes/EP001/screenplay.md=<accepted-sha256> --verdict-owner short-drama-review --verdict-artifact reviews/EP001-verdict.json --verdict-hash <verdict-file-sha256>
 python3 <short-drama-skill-dir>/scripts/project_tool.py package <project> --episode EP001 --include <accepted-path> [...] [--omit <accepted-path> ...]
+python3 <short-drama-skill-dir>/scripts/project_tool.py verify <project> --episode EP001
 ```
 
 ## 发布与创作者确认
@@ -26,6 +27,48 @@ python3 <short-drama-skill-dir>/scripts/project_tool.py package <project> --epis
 Markdown、JSON 或 JSONL。命令把来源文件和 `--input` 依赖的准确路径与 `hash` 写入
 预写日志，只发布 `candidate`，且只检查文件格式；`validation_state` 保持 `not_run`，不能同时写入创作者确认
 或独立审查结论。
+
+### `publish` 拒绝写入的目标
+
+以下目标在发布阶段直接报错，不进入预写日志，创作者文件保持原样。全部按**忽略大小写**
+比对：本套件常运行在大小写不敏感的文件系统上，`Delivery/x` 与 `delivery/x` 是同一个
+文件，区分大小写的判断在那里等于没有判断。
+
+| 目标 | 原因 |
+|---|---|
+| `inputs/**` | 创作者交来的来源材料不可变 |
+| `.short-drama/**` | 机器状态，只由工具自身维护 |
+| 任意位置的 `short-drama.json` | 承载 `creator_authority`。按**文件名**拦截而不只是根目录那一份：`find_project` 向上查找，被放进子目录的同名文件会让该子目录冒充项目根 |
+| `delivery/**` | 只由 `package` 闸门写入；否则已交付的 `manifest.json` 可被事后替换 |
+
+**只能发布到标准阶段目录**：`development`、`bible`、`episodes`、`creator-decisions`、
+`reviews`。写错一个字母（`epsiodes/`）此前会建出一棵平行目录树，而 `status` 从不报告它。
+确实需要放在别处的临时文件加 `--allow-unregistered-path`：仍然可行，但不再是静默的。
+
+**分集目录必须写成 `episodes/<EP>/`，`<EP>` 是 `EP` + 三位数字**（`EP001`；超过
+`EP999` 之后不再补零，写 `EP1000`）。`ep1`、`EP1`、`EP0001` 都会被拒绝——`EP0001`
+被拒是因为它会成为 `EP001` 的第二种拼写，而交付完整性闸门按 `episodes/<EP>/` 前缀
+枚举本集产物，另一种拼写下的产物会被静默跳过，于是闸门在一个它从未清点过的分集上通过。
+`package --include` 同样按这条规则校验。同一形式也用于剧本的 `# EP001` 集标题。
+
+**结构化引用里的 `hash` 必须是 64 位小写十六进制**。直接发布还带 `<sha256>` 占位符的
+模板会报 `structured ref hash is unfilled or invalid`。此前这类引用被静默丢弃，导致
+填得越少、依赖检查越宽松——正好与 hash 绑定的目的相反。
+
+**已声明产物的负责技能是固定的**：`episodes/<EP>/screenplay.md` 只能由
+`short-drama-write` 发布，`storyboard/motion-specs.jsonl` 只能由
+`short-drama-video-prompts` 发布，其余见
+[contract-and-ownership.md](contract-and-ownership.md) 的单一负责人登记表。表里没有
+点名的路径不受此限——契约为自己的产物指定负责人，不为创作者可能放进去的每个文件指定。
+
+以上是**发布**时的规则。已经写进预写日志的路径不受影响：对旧 manifest 套用今天的
+布局政策会让回滚直接报错而不是还原创作者的上一版，`recover` 每次都重复报阻塞，项目
+再也退不出来。所以布局只在新路径产生的地方校验。
+
+**已有不合规目录的项目怎么迁移**：`episodes/ep1/` 里的产物仍可 `accept`，但不能再发布
+新版本，也不能打包交付。把内容按 `episodes/EP001/` 重新发布一次并重新接受即可；旧路径
+因不再有已接受负责人而退出交付枚举，磁盘上的旧文件不会被自动删除，确认新版本无误后
+自行清理。
 
 `accept` 使用创作者决定记录，把所有准确的 `candidate` 目标 `hash` 推进为
 `accepted`；记录的负责人固定为 `creator`。
@@ -107,6 +150,17 @@ JSONL 记录必须用 `--evidence-record-id` 唯一定位同名 `decision_id`；
 `recover --transaction <txid>` 只处理指定事务。`package` 会重新验证状态文件中保存的创作者
 决定和独立审查记录，只打包当前 `hash` 与已接受快照一致、并且各项交付状态都已就绪的
 Markdown、JSON 或 JSONL。
+
+### `verify`：复核已交付的包
+
+```text
+python3 <short-drama-skill-dir>/scripts/project_tool.py verify <project> --episode EP001
+```
+
+`package` 会写出 `checksums.sha256`，但在此之前没有任何命令再读它——交付目录被事后
+改动仍然"看起来已交付"。`verify` 重新计算每个已登记文件的 hash，并额外报告**未登记
+的新增文件**（校验和清单对它是盲的）。结果 `status` 为 `intact` 或 `tampered`，
+后者列出 `mismatched`、`missing`、`unlisted` 三类。
 
 ### 完整性由工具枚举，取舍由创作者声明
 

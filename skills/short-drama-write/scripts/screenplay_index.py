@@ -40,9 +40,13 @@ KIND_CODES = {
     "comment": "C",
 }
 
-EPISODE_HEADING_RE = re.compile(r"^# (?P<episode>EP\d{3})(?: .+)?$")
+# Three digits through EP999, then unpadded — the same single spelling per
+# episode number the lifecycle tool enforces on `episodes/<EP>/`. A fixed three
+# digits would have made EP1000 a legal directory but an illegal heading.
+_EPISODE = r"EP(?:[0-9]{3}|[1-9][0-9]{3,})"
+EPISODE_HEADING_RE = re.compile(rf"^# (?P<episode>{_EPISODE})(?: .+)?$")
 SCENE_HEADING_RE = re.compile(
-    r"^## (?P<scene>EP\d{3}-SC\d{3}) "
+    rf"^## (?P<scene>{_EPISODE}-SC[0-9]{{3}}) "
     r"(?P<space>内外|内|外) · (?P<location>\S(?:.*\S)?) · "
     r"(?P<time>\S(?:.*\S)?)$"
 )
@@ -225,7 +229,7 @@ def _parse_screenplay(
                     _issue(
                         span,
                         "invalid_scene_heading",
-                        "场景标题必须为 ## <EPxxx-SCxxx> <内|外|内外> · <地点> · <时间/天气>。",
+                        "场景标题必须为 ## <EP001-SC001> <内|外|内外> · <地点> · <时间/天气>。",
                     )
                 )
             else:
@@ -256,7 +260,7 @@ def _parse_screenplay(
                 scene_id = None
             else:
                 scene_id = None
-                issues.append(_issue(span, "invalid_episode_heading", "集标题必须以 # EPxxx 开头。"))
+                issues.append(_issue(span, "invalid_episode_heading", "集标题必须以 # EP001 开头（EP 加三位数字，超过 EP999 后不补零）。"))
             index += 1
             continue
 

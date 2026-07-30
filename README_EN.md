@@ -147,18 +147,18 @@ prefix and state the task directly.
 Use $short-drama to init a vertical 9:16 urban face-slapping short-drama project
 
 # 2. Write episode 1 around character choice, a local result, and exact handoff
-Use $short-drama-write to write EP1: a delivery rider humiliated at a luxury
+Use $short-drama-write to write EP001: a delivery rider humiliated at a luxury
 hotel turns out to be the group chairman
 
 # 3. Assets; optionally run asset-reference prompts and storyboard keyframes in
 #    parallel, then write video prompts
-Use $short-drama-assets to extract characters/scenes/props from EP1
+Use $short-drama-assets to extract characters/scenes/props from EP001
 Use $short-drama-image-prompts to write reference prompts for accepted assets
-Use $short-drama-storyboard to storyboard EP1
+Use $short-drama-storyboard to storyboard EP001
 Use $short-drama-video-prompts to translate each authored shot into a video prompt
 
 # 4. Independent review
-Use $short-drama-review to review EP1's script and prompts
+Use $short-drama-review to review EP001's script and prompts
 ```
 
 See [demo/](demo/) for a creator-facing excerpt chain: one episode's script →

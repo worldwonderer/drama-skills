@@ -75,6 +75,74 @@ PROJECT_DIRS = (
     ".short-drama/locks",
     ".short-drama/tmp",
 )
+# Episode directories are the unit the delivery completeness gate enumerates by
+# prefix, so a path whose episode segment does not match this form is accepted,
+# then silently skipped by _episode_coverage and never reconciled. Exactly one
+# spelling per episode number is therefore required: three digits up to EP999,
+# then unpadded. EP0001 is refused because it would be a second, invisible
+# spelling of EP001 rather than a distinct episode.
+EPISODE_ID_RE = re.compile(r"EP(?:[0-9]{3}|[1-9][0-9]{3,})")
+# Roots no stage may publish into, each with the reason a creator needs. Matched
+# case-insensitively: this suite is developed on case-insensitive filesystems,
+# where `Inputs/x.md` and `inputs/x.md` are the same file on disk, so a
+# case-sensitive guard is not a guard at all.
+PROTECTED_PUBLISH_ROOTS = {
+    "inputs": "creator inputs are immutable publication sources",
+    "delivery": "the delivery tree is written by the packaging gate, not by publication",
+    ".short-drama": "operational state cannot be a publication target",
+}
+# Roots a stage may publish into. Anything else needs an explicit opt-in, so an
+# ad-hoc creator file stays possible but never silent: a typo like `epsiodes/`
+# otherwise builds a parallel tree that `status` never reports.
+PUBLISHABLE_ROOTS = ("development", "bible", "episodes", "creator-decisions", "reviews")
+# Declared artifact -> owning skill, transcribed from each stage SKILL.md's
+# owned-output list and the single-owner registry in
+# references/contract-and-ownership.md. Keys are casefolded; see
+# _expected_path_owner.
+#
+# Deliberately keyed on exact declared names rather than on directory prefixes.
+# A prefix rule would have to answer "who owns episodes/EP001/anything.json",
+# and the contract does not: an episode directory holds artifacts from four
+# different skills, and a creator may legitimately place their own file beside
+# them. Inventing an answer would refuse those while claiming contract
+# authority the contract never granted. Everything not named here is
+# layout-checked but owner-unconstrained.
+DECLARED_PROJECT_ARTIFACT_OWNERS: dict[str, str] = {
+    "development/creative-brief.md": "short-drama-develop",
+    "development/story-engine.md": "short-drama-develop",
+    "development/director-brief.md": "short-drama-develop",
+    "development/adaptation-map.jsonl": "short-drama-develop",
+    "development/series-arc.json": "short-drama-develop",
+    "development/episode-map.jsonl": "short-drama-develop",
+    # Cross-episode identity ledgers. Every skill that names these reads them;
+    # `short-drama-assets/SKILL.md:130` is the only declared writer.
+    "bible/characters.jsonl": "short-drama-assets",
+    "bible/looks.jsonl": "short-drama-assets",
+    "bible/locations.jsonl": "short-drama-assets",
+    "bible/location-views.jsonl": "short-drama-assets",
+    "bible/props.jsonl": "short-drama-assets",
+    "bible/prop-states.jsonl": "short-drama-assets",
+}
+# Same, for the path below `episodes/<EP>/`.
+DECLARED_EPISODE_ARTIFACT_OWNERS: dict[str, str] = {
+    "episode-card.json": "short-drama-write",
+    "beats.jsonl": "short-drama-write",
+    "screenplay.md": "short-drama-write",
+    "screenplay-index.jsonl": "short-drama-write",
+    "voice-record-sheet.jsonl": "short-drama-write",
+    "assets/occurrences.jsonl": "short-drama-assets",
+    "assets/decisions.jsonl": "short-drama-assets",
+    "assets/continuity.jsonl": "short-drama-assets",
+    "assets/image-prompt-specs.jsonl": "short-drama-image-prompts",
+    "assets/image-prompts.md": "short-drama-image-prompts",
+    "storyboard/coverage.json": "short-drama-storyboard",
+    "storyboard/shots.jsonl": "short-drama-storyboard",
+    "storyboard/keyframes.jsonl": "short-drama-storyboard",
+    "storyboard/keyframe-prompts.md": "short-drama-storyboard",
+    "storyboard/motion-specs.jsonl": "short-drama-video-prompts",
+    "storyboard/delivery-containers.jsonl": "short-drama-video-prompts",
+    "storyboard/video-prompts.md": "short-drama-video-prompts",
+}
 
 LIFECYCLE_STATES: dict[str, tuple[str, ...]] = {
     "build_state": ("absent", "in_progress", "materialized", "stale", "failed"),
@@ -369,9 +437,62 @@ def _relative_path(value: str | Path, *, allow_operations: bool = False) -> str:
     if not raw or pure.is_absolute() or any(part in ("", ".", "..") for part in pure.parts):
         raise ValueError(f"unsafe project-relative path: {value!s}")
     relative = pure.as_posix()
-    if not allow_operations and pure.parts[0] == ".short-drama":
+    if not allow_operations and pure.parts[0].casefold() == ".short-drama":
         raise ValueError("operational state cannot be a publication target")
     return relative
+
+
+def _validate_publication_layout(
+    relative: str, *, owner: str | None = None, allow_unregistered: bool = False
+) -> None:
+    """Reject a publication target that breaks the project layout contract.
+
+    Deliberately NOT part of _relative_path. That function also normalizes
+    paths already recorded in a write-ahead log, and applying today's layout
+    policy to yesterday's manifest would make an interrupted transaction
+    unrecoverable: rollback would raise instead of restoring the creator's
+    prior bytes, and every later `recover` would re-report the same block.
+    Layout is therefore checked only where a new path is minted.
+    """
+
+    pure = PurePosixPath(relative)
+    first = pure.parts[0].casefold()
+    reason = PROTECTED_PUBLISH_ROOTS.get(first)
+    if reason is not None:
+        raise ValueError(reason)
+    # Compared by basename, not by full path: a planted development/short-drama.json
+    # makes find_project treat that subdirectory as its own project root, so a
+    # creator running `status` from inside it reads the decoy.
+    if pure.name.casefold() == PROJECT_FILE:
+        raise ValueError("creator authority file cannot be a publication target")
+    if first == "episodes":
+        if len(pure.parts) < 3:
+            raise ValueError(f"episode artifacts live in episodes/<EP>/: {relative}")
+        if EPISODE_ID_RE.fullmatch(pure.parts[1]) is None:
+            raise ValueError(
+                f"episode directory must use an EP001-style identifier: {pure.parts[1]}"
+            )
+    if not allow_unregistered and first not in PUBLISHABLE_ROOTS:
+        raise ValueError(
+            f"{pure.parts[0]} is not a project stage directory; "
+            f"expected one of {', '.join(PUBLISHABLE_ROOTS)}"
+        )
+    if owner is not None:
+        expected = _expected_path_owner(relative)
+        if expected is not None and owner != expected:
+            raise ValueError(f"{expected} owns {relative}, not {owner}")
+
+
+def _expected_path_owner(relative: str) -> str | None:
+    # Casefolded like every other path guard here. A case-sensitive lookup
+    # would let `Episodes/EP001/screenplay.md` past the ownership check and,
+    # on a case-insensitive filesystem, overwrite the very artifact the check
+    # protects.
+    pure = PurePosixPath(relative.casefold())
+    if pure.parts[0] == "episodes" and len(pure.parts) >= 3:
+        remainder = PurePosixPath(*pure.parts[2:]).as_posix()
+        return DECLARED_EPISODE_ARTIFACT_OWNERS.get(remainder)
+    return DECLARED_PROJECT_ARTIFACT_OWNERS.get(pure.as_posix())
 
 
 def _project_path(root: Path, relative: str) -> Path:
@@ -715,6 +836,8 @@ def publish_transaction(
     fault_injector: FaultInjector | None = None,
     authority: str = "accepted",
     owner: str | None = None,
+    allow_unregistered_path: bool = False,
+    _delivery_gate: bool = False,
 ) -> dict[str, Any]:
     """Publish multiple files with deterministic crash recovery.
 
@@ -742,8 +865,16 @@ def publish_transaction(
         apply_lifecycle_changes({}, changes)
         validated_changes[str(artifact_id)] = dict(changes)
     relative_outputs = {_relative_path(key): value for key, value in outputs.items()}
-    if any(PurePosixPath(relative).parts[0] == "inputs" for relative in relative_outputs):
-        raise ValueError("creator inputs are immutable publication sources")
+    # `_delivery_gate` is an internal argument, not a stage name: `stage` is
+    # creator-supplied, so gating on stage == "delivery" would let any caller
+    # unlock the packaged tree by naming itself after it. It skips the layout
+    # contract entirely because build_delivery_package constructs every one of
+    # its output keys itself from an already-validated episode id.
+    if not _delivery_gate:
+        for relative in relative_outputs:
+            _validate_publication_layout(
+                relative, owner=owner, allow_unregistered=allow_unregistered_path
+            )
 
     if target_artifacts is None:
         default_artifact = next(iter(validated_changes)) if len(validated_changes) == 1 else stage
@@ -1291,12 +1422,21 @@ def _structured_candidate_refs(
             owner = value.get("owner")
             artifact = value.get("artifact")
             digest = value.get("hash")
-            if (
-                isinstance(owner, str)
-                and isinstance(artifact, str)
-                and isinstance(digest, str)
-                and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
-            ):
+            if isinstance(owner, str) and isinstance(artifact, str) and "hash" in value:
+                # A ref carrying an unfilled placeholder used to be skipped
+                # here, so a candidate published straight from a template
+                # contributed no dependency edges at all and the exact-input
+                # cross-check below never ran: the less that was filled in, the
+                # cleaner the publish looked. _normalize_artifact_ref already
+                # rejects the same shape for lifecycle evidence refs.
+                #
+                # Keyed on the presence of `hash`, not on its being a string:
+                # gating on isinstance would leave `"hash": null` and
+                # `"hash": 123` as the same silent drop under a new spelling.
+                # `*_locator` objects carry no `hash` key at all, so they stay
+                # untouched.
+                if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                    raise ValueError(f"structured ref hash is unfilled or invalid: {artifact}")
                 authority = value.get("authority")
                 if authority not in {None, "accepted", "candidate"}:
                     raise ValueError(
@@ -1809,6 +1949,7 @@ def publish_candidate(
     input_hashes: Mapping[str, str] | None = None,
     input_records: Mapping[str, Iterable[str]] | None = None,
     fault_injector: FaultInjector | None = None,
+    allow_unregistered_path: bool = False,
 ) -> dict[str, Any]:
     """Publish a validated candidate without claiming creator or review authority.
 
@@ -1825,6 +1966,12 @@ def publish_candidate(
     normalized_outputs: dict[str, bytes] = {}
     for raw, value in outputs.items():
         relative = _relative_path(raw)
+        # Layout before content: a target that will be refused anyway should
+        # say so, rather than first reporting that a file the creator never
+        # meant to put there is not valid JSON.
+        _validate_publication_layout(
+            relative, owner=owner, allow_unregistered=allow_unregistered_path
+        )
         content = value.encode("utf-8") if isinstance(value, str) else bytes(value)
         _validate_candidate_content(relative, content)
         normalized_outputs[relative] = content
@@ -1942,6 +2089,7 @@ def publish_candidate(
         read_records=read_records,
         authority="candidate",
         owner=owner,
+        allow_unregistered_path=allow_unregistered_path,
         fault_injector=fault_injector,
     )
     return {
@@ -2638,7 +2786,11 @@ def _episode_coverage(
     episode, so the enumeration belongs here rather than in someone's memory.
     """
 
-    prefix = f"episodes/{episode}/"
+    # Casefolded: on a case-insensitive filesystem an artifact accepted as
+    # `Episodes/EP001/…` is the same file as `episodes/EP001/…`, and a
+    # case-sensitive prefix would skip it — leaving nothing to reconcile and
+    # passing the completeness gate on an episode it never enumerated.
+    prefix = f"episodes/{episode}/".casefold()
     coverage: dict[str, dict[str, Any]] = {}
     artifacts = state.get("artifacts")
     if not isinstance(artifacts, dict):
@@ -2655,7 +2807,7 @@ def _episode_coverage(
             record.get(axis) in values for axis, values in DELIVERY_READY.items()
         )
         for relative in accepted:
-            if not isinstance(relative, str) or not relative.startswith(prefix):
+            if not isinstance(relative, str) or not relative.casefold().startswith(prefix):
                 continue
             coverage[relative] = {"artifact_id": artifact_id, "ready": ready}
     return dict(sorted(coverage.items()))
@@ -2670,7 +2822,7 @@ def build_delivery_package(
     omitted_paths: Iterable[str | Path] | None = None,
 ) -> dict[str, Any]:
     root = find_project(path)
-    if not re.fullmatch(r"EP[0-9]{3,}", episode):
+    if EPISODE_ID_RE.fullmatch(episode) is None:
         raise ValueError("episode must use an EP001-style identifier")
     exceptions, allowed_urls_by_path = _normalize_text_exceptions(text_exceptions)
     state = _read_state(root)
@@ -2679,8 +2831,15 @@ def build_delivery_package(
     source_artifacts: set[str] = set()
     for raw in sorted({_relative_path(selected) for selected in selected_paths}):
         pure = PurePosixPath(raw)
-        if pure.parts[0] in {"inputs", "delivery", ".short-drama"}:
+        if pure.parts[0].casefold() in PROTECTED_PUBLISH_ROOTS:
             raise PackageBlockedError(f"private or operational zone excluded: {raw}")
+        # A selection naming episodes/ep1/ would be prefix-skipped by
+        # _episode_coverage, so the completeness reconciliation below would see
+        # nothing to reconcile and pass on an episode it never enumerated.
+        if pure.parts[0].casefold() == "episodes" and (
+            len(pure.parts) < 3 or EPISODE_ID_RE.fullmatch(pure.parts[1]) is None
+        ):
+            raise PackageBlockedError(f"episode selection must use episodes/<EP>/: {raw}")
         lowered_parts = {part.casefold() for part in pure.parts}
         if "research" in lowered_parts or "research-notes.md" in lowered_parts:
             raise PackageBlockedError(f"optional research notes are excluded: {raw}")
@@ -2795,6 +2954,7 @@ def build_delivery_package(
         lifecycle_changes=lifecycle_changes,
         target_artifacts={target: delivery_artifact for target in outputs},
         read_set={entry["source"]: entry["sha256"] for entry in files},
+        _delivery_gate=True,
     )
     return {
         "project_root": str(root),
@@ -2802,6 +2962,86 @@ def build_delivery_package(
         "file_count": len(files),
         "transaction_id": transaction["transaction_id"],
         "status": "delivered",
+    }
+
+
+def verify_delivery_package(path: Path, *, episode: str) -> dict[str, Any]:
+    """Re-read a delivered package and check it against its own checksums.
+
+    `package` writes `checksums.sha256` and nothing ever read it back, so a
+    delivered tree could be edited afterwards and still look delivered. This is
+    the missing half: it re-hashes every listed file, and reports extra files
+    too, because an unlisted addition is invisible to a checksum list.
+    """
+
+    root = find_project(path)
+    if EPISODE_ID_RE.fullmatch(episode) is None:
+        raise ValueError("episode must use an EP001-style identifier")
+    delivery = root / "delivery" / episode
+    checksums = delivery / "checksums.sha256"
+    if not checksums.is_file():
+        raise PackageBlockedError(f"no delivered package for {episode}")
+
+    # Authenticate the checksum file itself before trusting a single line of
+    # it. Anyone who can edit a delivered artifact can also recompute the list
+    # to match, which would make this command report `intact` on exactly the
+    # tampering it exists to catch. The independent anchor is the accepted
+    # hash recorded in project state when `package` published the tree.
+    checksums_relative = f"delivery/{episode}/checksums.sha256"
+    state = _read_state(root)
+    artifacts = state.get("artifacts")
+    recorded: str | None = None
+    if isinstance(artifacts, dict):
+        record = artifacts.get(f"delivery:{episode}")
+        accepted = record.get("accepted_targets") if isinstance(record, dict) else None
+        if isinstance(accepted, dict) and isinstance(
+            accepted.get(checksums_relative), str
+        ):
+            recorded = accepted[checksums_relative]
+    checksums_hash = sha256_file(checksums)
+    checksum_list_authentic = recorded is not None and recorded == checksums_hash
+
+    expected: dict[str, str] = {}
+    for number, line in enumerate(
+        checksums.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        digest, separator, relative = line.partition("  ")
+        if not separator or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise PackageBlockedError(f"checksum line {number} is malformed")
+        if relative in expected:
+            raise PackageBlockedError(f"checksum line {number} repeats {relative}")
+        expected[relative] = digest
+
+    mismatched: list[str] = []
+    missing: list[str] = []
+    for relative, digest in sorted(expected.items()):
+        target = delivery / relative
+        if not target.is_file():
+            missing.append(relative)
+        elif sha256_file(target) != digest:
+            mismatched.append(relative)
+
+    present = {
+        str(item.relative_to(delivery).as_posix())
+        for item in delivery.rglob("*")
+        if item.is_file()
+    }
+    unlisted = sorted(present - set(expected) - {"checksums.sha256"})
+
+    intact = checksum_list_authentic and not (mismatched or missing or unlisted)
+    return {
+        "project_root": str(root),
+        "episode": episode,
+        "file_count": len(expected),
+        "mismatched": mismatched,
+        "missing": missing,
+        "unlisted": unlisted,
+        # False when the checksum list no longer matches the hash recorded at
+        # package time, i.e. the list was rewritten after delivery.
+        "checksum_list_authentic": checksum_list_authentic,
+        "status": "intact" if intact else "tampered",
     }
 
 
@@ -2846,6 +3086,7 @@ def _publish_from_cli(args: argparse.Namespace) -> dict[str, Any]:
         root,
         owner=args.owner,
         artifact_id=args.artifact_id,
+        allow_unregistered_path=bool(getattr(args, "allow_unregistered_path", False)),
         outputs=outputs,
         input_hashes=inputs,
         input_records=records or None,
@@ -2887,6 +3128,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         dest="inputs",
         help="Bind an additional exact project input as PATH=SHA256.",
+    )
+    publish.add_argument(
+        "--allow-unregistered-path",
+        action="store_true",
+        help=(
+            "Publish outside the standard stage directories. Ad-hoc creator "
+            "files stay possible; without this flag a mistyped stage directory "
+            "is refused instead of building a parallel tree status never reports."
+        ),
     )
     publish.add_argument(
         "--input-record",
@@ -2942,6 +3192,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     package.add_argument("--text-exceptions", type=Path)
+
+    verify = subparsers.add_parser(
+        "verify", help="Re-check a delivered package against its own checksums."
+    )
+    verify.add_argument("path", type=Path)
+    verify.add_argument("--episode", required=True)
     return parser
 
 
@@ -2997,6 +3253,8 @@ def main(argv: list[str] | None = None) -> int:
                 reviewed_targets=_parse_cli_pairs(args.targets, label="target"),
                 verdict_ref=verdict_ref,
             )
+        elif args.command == "verify":
+            result = verify_delivery_package(args.path, episode=args.episode)
         else:
             exceptions = None
             if args.text_exceptions:
@@ -3011,6 +3269,11 @@ def main(argv: list[str] | None = None) -> int:
                 omitted_paths=args.omissions,
             )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        # `verify` is the only subcommand that reports a verdict in its payload
+        # instead of raising, so it needs the same exit convention the check
+        # scripts use: a tampered package must fail a CI step or an && chain.
+        if result.get("status") == "tampered":
+            return 1
         return 0
     except (
         OSError,

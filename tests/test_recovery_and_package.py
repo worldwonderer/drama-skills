@@ -1,8 +1,11 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -173,6 +176,49 @@ class RecoveryTests(unittest.TestCase):
                     self.assertEqual(result["direction"], direction)
                     final = project_tool.recover_transaction(root, txid)
                     self.assertTrue(final["already_recovered"])
+
+    def test_recovery_ignores_layout_policy_a_legacy_manifest_predates(self) -> None:
+        # Layout rules apply where a path is minted, never to a path already
+        # recorded in a write-ahead log. Applying today's policy to yesterday's
+        # manifest would raise during rollback instead of restoring the
+        # creator's prior bytes, and every later recover would re-report the
+        # same block, leaving the project permanently wedged.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            legacy = root / "episodes/ep1/screenplay.md"
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text("旧剧本\n", encoding="utf-8")
+
+            def fail(selected: str, _context: dict[str, object]) -> None:
+                if selected == "after_replace:0":
+                    raise InjectedCrash(selected)
+
+            # Model a manifest written by a build that predates the layout
+            # rule: the WAL legitimately holds a path today's policy refuses.
+            with (
+                unittest.mock.patch.object(
+                    project_tool, "_validate_publication_layout", lambda *a, **k: None
+                ),
+                self.assertRaises(InjectedCrash),
+            ):
+                project_tool.publish_transaction(
+                    root,
+                    stage="write",
+                    outputs={"episodes/ep1/screenplay.md": "新剧本\n"},
+                    lifecycle_changes={"legacy:script": ready_axes()},
+                    target_artifacts={"episodes/ep1/screenplay.md": "legacy:script"},
+                    fault_injector=fail,
+                )
+            self.assertEqual(legacy.read_text(encoding="utf-8"), "新剧本\n")
+
+            txid = sorted((root / ".short-drama/transactions").iterdir())[-1].name
+            result = project_tool.recover_transaction(root, txid)
+
+            self.assertEqual(result["direction"], "rollback")
+            self.assertEqual(legacy.read_text(encoding="utf-8"), "旧剧本\n")
+            self.assertTrue(
+                project_tool.recover_transaction(root, txid)["already_recovered"]
+            )
 
     def test_external_edit_is_preserved_exactly_and_blocks_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -495,6 +541,164 @@ class PackageTests(unittest.TestCase):
             },
         )
         return root
+
+    def test_delivery_tree_is_writable_only_through_the_packaging_gate(self) -> None:
+        # `delivery/` is excluded as a package source but used to be a legal
+        # publish target, so a delivered manifest could be replaced after the
+        # fact. build_delivery_package opts back in through an internal
+        # argument rather than through `stage`, which the creator supplies.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            project_tool.build_delivery_package(
+                root,
+                episode="EP001",
+                selected_paths=[
+                    "episodes/EP001/screenplay.md",
+                    "episodes/EP001/assets/image-prompt-specs.jsonl",
+                ],
+            )
+            manifest = root / "delivery/EP001/manifest.json"
+            self.assertTrue(manifest.is_file())
+            before = manifest.read_bytes()
+            for stage in ("short-drama-write", "delivery"):
+                with self.subTest(stage=stage):
+                    with self.assertRaisesRegex(ValueError, "written by the packaging gate"):
+                        project_tool.publish_transaction(
+                            root,
+                            stage=stage,
+                            outputs={"delivery/EP001/manifest.json": '{"forged":true}\n'},
+                            lifecycle_changes={"EP001:script": {"build_state": "materialized"}},
+                        )
+            self.assertEqual(manifest.read_bytes(), before)
+
+    def test_verify_detects_tampering_the_checksum_file_alone_cannot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            project_tool.build_delivery_package(
+                root,
+                episode="EP001",
+                selected_paths=[
+                    "episodes/EP001/screenplay.md",
+                    "episodes/EP001/assets/image-prompt-specs.jsonl",
+                ],
+            )
+            self.assertEqual(
+                project_tool.verify_delivery_package(root, episode="EP001")["status"],
+                "intact",
+            )
+
+            delivered = root / "delivery/EP001/artifacts/episodes/EP001/screenplay.md"
+            delivered.write_text("# 被改过的交付稿\n", encoding="utf-8")
+            tampered = project_tool.verify_delivery_package(root, episode="EP001")
+            self.assertEqual(tampered["status"], "tampered")
+            self.assertEqual(
+                tampered["mismatched"], ["artifacts/episodes/EP001/screenplay.md"]
+            )
+
+    def test_verify_reports_an_addition_the_checksum_list_is_blind_to(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            project_tool.build_delivery_package(
+                root,
+                episode="EP001",
+                selected_paths=[
+                    "episodes/EP001/screenplay.md",
+                    "episodes/EP001/assets/image-prompt-specs.jsonl",
+                ],
+            )
+            planted = root / "delivery/EP001/artifacts/episodes/EP001/extra.md"
+            planted.write_text("# 未登记\n", encoding="utf-8")
+
+            result = project_tool.verify_delivery_package(root, episode="EP001")
+
+            self.assertEqual(result["status"], "tampered")
+            self.assertEqual(
+                result["unlisted"], ["artifacts/episodes/EP001/extra.md"]
+            )
+            self.assertEqual(result["mismatched"], [])
+
+    def test_verify_rewriting_the_checksum_list_does_not_launder_a_change(
+        self,
+    ) -> None:
+        # Anyone able to edit a delivered artifact can also recompute the list
+        # to match it, so the list has to be authenticated against the hash
+        # recorded when `package` published the tree.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            project_tool.build_delivery_package(
+                root,
+                episode="EP001",
+                selected_paths=[
+                    "episodes/EP001/screenplay.md",
+                    "episodes/EP001/assets/image-prompt-specs.jsonl",
+                ],
+            )
+            delivery = root / "delivery/EP001"
+            target = delivery / "artifacts/episodes/EP001/screenplay.md"
+            target.write_text("# 被改过的交付稿\n", encoding="utf-8")
+
+            checksums = delivery / "checksums.sha256"
+            rewritten = []
+            for line in checksums.read_text(encoding="utf-8").splitlines():
+                _, _, relative = line.partition("  ")
+                member = delivery / relative
+                rewritten.append(f"{project_tool.sha256_file(member)}  {relative}")
+            checksums.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+            result = project_tool.verify_delivery_package(root, episode="EP001")
+
+            self.assertEqual(result["mismatched"], [])
+            self.assertFalse(result["checksum_list_authentic"])
+            self.assertEqual(result["status"], "tampered")
+
+    def test_verify_cli_exits_nonzero_on_a_tampered_package(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            project_tool.build_delivery_package(
+                root,
+                episode="EP001",
+                selected_paths=[
+                    "episodes/EP001/screenplay.md",
+                    "episodes/EP001/assets/image-prompt-specs.jsonl",
+                ],
+            )
+            command = [sys.executable, str(SCRIPT), "verify", str(root), "--episode", "EP001"]
+
+            intact = subprocess.run(command, check=False, capture_output=True, text=True)
+            self.assertEqual(intact.returncode, 0, msg=intact.stderr)
+            self.assertEqual(json.loads(intact.stdout)["status"], "intact")
+
+            (root / "delivery/EP001/artifacts/episodes/EP001/screenplay.md").write_text(
+                "# 被改过\n", encoding="utf-8"
+            )
+            tampered = subprocess.run(command, check=False, capture_output=True, text=True)
+
+            # A verdict in the payload with exit 0 cannot gate a CI step.
+            self.assertEqual(tampered.returncode, 1, msg=tampered.stdout)
+            self.assertEqual(json.loads(tampered.stdout)["status"], "tampered")
+
+    def test_verify_refuses_an_episode_that_was_never_delivered(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            with self.assertRaisesRegex(
+                project_tool.PackageBlockedError, "no delivered package"
+            ):
+                project_tool.verify_delivery_package(root, episode="EP002")
+
+    def test_package_rejects_malformed_episode_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            with self.assertRaisesRegex(
+                project_tool.PackageBlockedError, "episode selection must use"
+            ):
+                project_tool.build_delivery_package(
+                    root,
+                    episode="EP001",
+                    selected_paths=[
+                        "episodes/EP001/screenplay.md",
+                        "episodes/ep1/storyboard/shots.jsonl",
+                    ],
+                )
 
     def test_package_contains_only_selected_approved_text_json_and_checksums(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

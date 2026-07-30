@@ -245,6 +245,7 @@
     "phases": [
       "<阶段、overlap 与 landing 空间>"
     ],
+    "declares_overlap": false,
     "declared_total_or_endpoint_seconds": 0.0
   },
   "end_report": {

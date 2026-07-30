@@ -42,7 +42,7 @@
 合成示例：
 
 ```json
-{"artifact_ref":{"owner":"short-drama-storyboard","artifact":"episodes/EPX/storyboard/keyframes.jsonl","hash":"<sha256>","record_id":"KEY-X","authority":"candidate"},"role":"composition","may_control":["subject occupancy","camera side","negative space"],"must_not_control":["character identity","wardrobe","prop text","story state"],"admission_status":"unverified","reference_observation_ref":null,"unresolved_risks":["输入参考尚无可审查的文字/水印观察记录"]}
+{"artifact_ref":{"owner":"short-drama-storyboard","artifact":"episodes/<EP>/storyboard/keyframes.jsonl","hash":"<sha256>","record_id":"KEY-X","authority":"candidate"},"role":"composition","may_control":["subject occupancy","camera side","negative space"],"must_not_control":["character identity","wardrobe","prop text","story state"],"admission_status":"unverified","reference_observation_ref":null,"unresolved_risks":["输入参考尚无可审查的文字/水印观察记录"]}
 ```
 
 项目可以使用更准确的角色名，但审查者必须能看出哪些内容可以参考、哪些不能照搬。

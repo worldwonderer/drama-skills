@@ -177,6 +177,18 @@
 - **`reviewed_invariant`**：即使数学不超时，台词、动作、反应是否可完成仍由审查者结合语言、强度和物理路径判断。
 - 不设通用“每秒几字/几个动作”硬门槛。
 
+写显式秒段时按这三个字段落实：
+
+| 字段 | 含义 |
+|---|---|
+| `timing_plan.mode` | `explicit` 才做算术断言。写 `relative` 就不要再给分段标 `explicit`，两者同时出现是自相矛盾，校验器会直接报 `VID_TIMING_MODE_INCONSISTENT` 而不是替你选一个 |
+| `timing_plan.declares_overlap` | 分段区间确实要重叠时置 `true`，此时占用时间按并集计算。留空或 `false` 而区间又重叠，视为漏写重叠关系而不是默认相加 |
+| `timing_plan.declared_total_or_endpoint_seconds` | 可以写并集占用时长，也可以写终点秒数；两种读法都接受，但必须与分段实际情况对得上 |
+
+算术由 [motion_timing_check.py](../scripts/motion_timing_check.py) 执行：超出按**终点**判断，
+不足按裁剪到镜头长度内的**并集**判断。两者分开量是因为中间留空加尾部超出会互相抵消——
+`0.0-2.0` 加 `3.0-5.0` 在 4 秒镜头上"合计正好 4 秒"，实际却同时发生了截断与留白。
+
 ### 3.7 结束报告 `end_report`
 
 把描述结果写回同一组起止边界字段：姿态、位置、目光、双手、持物和可见状态变化。
