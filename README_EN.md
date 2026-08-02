@@ -13,20 +13,12 @@ The output is text: scripts, asset notes, prompts, review records.
 
 ## Demo
 
-The *Lone Fall into Demonhood* showcase adapts a mature costume-fantasy project
-into project setting records, two episode scripts, and twelve storyboard panels.
-The 15-second vertical video below was made separately as a temporary showcase for
-this project. It follows Gu Lin carrying a crystal coffin toward the border in one
-continuous shot; it is not a default suite artifact.
+*Lone Fall into Demonhood* includes project settings, two scripts, and twelve storyboard
+panels; the 15-second promo below is a temporary showcase, not a default suite artifact.
 
 https://github.com/user-attachments/assets/ae88b444-06e5-4964-856c-91e619020f12
 
-15.000 seconds · 720×1280 · 24 fps · H.264 + AAC, with Mandarin dialogue,
-environmental sound, music, and burned-in Chinese subtitles.
-
-![Chinese project dashboard browsing the showcase by production artifact](docs/assets/dashboard-zh.png)
-
-That screenshot is the local project dashboard that ships with the repo — see below.
+<img src="docs/assets/dashboard-zh.png" alt="Lone Fall into Demonhood project dashboard" width="680">
 
 ## Where this came from
 
@@ -157,9 +149,5 @@ One line inside your agent (Codex writes `$short-drama dashboard`):
 /short-drama dashboard
 ```
 
-The skill picks the project, allocates a loopback port, and opens the browser. The
-dashboard follows the real workspace and artifact chain with six views: All,
-Development, Scripts, Asset Settings, Storyboard & Video, and Review & Delivery.
-It browses and lightly edits project text, previews images and video in their actual
-stage directories read-only, and shows project status. Ad-hoc files remain available
-under All. It runs locally only, and needs macOS or Linux.
+The dashboard runs locally on macOS/Linux. It organizes text editing, media previews,
+and project status by production stage; ad-hoc files remain under **All**.
