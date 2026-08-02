@@ -1,8 +1,13 @@
 **中文** | [English](README_EN.md)
 
-# 短剧技能套件
+# Drama Skills
 
-面向编剧、漫剧工作室和编导的 AI 短剧创作套件。八个技能把一个点子或一部长篇材料，
+[![CI](https://github.com/worldwonderer/drama-skills/actions/workflows/ci.yml/badge.svg)](https://github.com/worldwonderer/drama-skills/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/worldwonderer/drama-skills)](https://github.com/worldwonderer/drama-skills/releases/latest)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/github/license/worldwonderer/drama-skills)](LICENSE)
+
+面向编剧、漫剧工作室和编导的 AI 短剧创作工作流。八个技能把一个点子或一部长篇材料，
 一路做成分集剧本、资产设定、图片提示词、分镜关键帧、视频提示词和独立审查记录，
 全程用同一套创作者决策、来源引用与连续性契约衔接。适配 Claude Code、Codex 和其他
 支持 Agent Skill 规范的运行环境。
@@ -11,7 +16,7 @@
 
 ## 演示
 
-《孤身入魔》演示含项目设定、两集剧本和十二板分镜；下方 15 秒宣传样片为临时展示，非套件默认产物。
+《孤身入魔》演示含项目设定、两集剧本和十二板分镜；下方 15 秒宣传样片为临时展示，非默认产物。
 
 https://github.com/user-attachments/assets/ae88b444-06e5-4964-856c-91e619020f12
 
@@ -27,7 +32,7 @@ https://github.com/user-attachments/assets/ae88b444-06e5-4964-856c-91e619020f12
 用 agent CLI 加文件维护工程、生成提示词，确认之后再送去生成——结果意外地顺手。
 现在留在自建工具里的，只剩排队抽卡。
 
-**刻意不含生图与生视频**：为防止未经确认的提示词误触发生成、造成预算浪费，套件
+**刻意不含生图与生视频**：为防止未经确认的提示词误触发生成、造成预算浪费，本项目
 不调用真正的图片、视频或音频生成服务。提示词先落进文件、由人确认，再进入生成环节。
 
 ## 安装
@@ -36,7 +41,7 @@ https://github.com/user-attachments/assets/ae88b444-06e5-4964-856c-91e619020f12
 Codex 等支持导入 GitHub 仓库的智能体：
 
 ```
-安装这个技能套件 https://github.com/worldwonderer/drama-skills
+安装这些技能 https://github.com/worldwonderer/drama-skills
 ```
 
 <details>

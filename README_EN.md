@@ -2,6 +2,11 @@
 
 # Drama Skills
 
+[![CI](https://github.com/worldwonderer/drama-skills/actions/workflows/ci.yml/badge.svg)](https://github.com/worldwonderer/drama-skills/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/worldwonderer/drama-skills)](https://github.com/worldwonderer/drama-skills/releases/latest)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/github/license/worldwonderer/drama-skills)](LICENSE)
+
 An AI short-drama creation suite for screenwriters, motion-comic studios, and
 directors. Eight skills take an idea or a long-form source all the way to episode
 scripts, asset decisions, image prompts, storyboard keyframes, video prompts, and
