@@ -1,4 +1,5 @@
 import contextlib
+import concurrent.futures
 import hashlib
 import http.client
 import importlib.util
@@ -25,7 +26,7 @@ create_server = dashboard_server.create_server
 
 
 def make_project(root: Path, title: str = "测试短剧") -> None:
-    root.mkdir(parents=True)
+    root.mkdir(parents=True, exist_ok=True)
     (root / "short-drama.json").write_text(
         json.dumps(
             {"project_id": "test", "title": title, "current_checkpoint": "draft"}
@@ -71,6 +72,40 @@ class ProjectStoreTests(unittest.TestCase):
             )
             self.assertEqual(warnings, [])
             self.assertEqual(len({item["id"] for item in projects}), 2)
+
+    def test_concurrent_discovery_has_an_independent_directory_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            make_project(workspace / "show")
+            store = self.store(workspace)
+            expected = store.discover()[0]
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+                results = list(executor.map(lambda _: store.discover()[0], range(96)))
+
+            self.assertTrue(all(result == expected for result in results))
+
+    def test_concurrent_root_project_requests_have_independent_cursors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            make_project(workspace)
+            (workspace / "notes.md").write_text("root project", encoding="utf-8")
+            store = self.store(workspace)
+            project_id = store.discover()[0][0]["id"]
+            expected_tree = store.tree(project_id)
+            expected_status = store.status(project_id)
+
+            def read(index: int):
+                if index % 2:
+                    return "status", store.status(project_id)
+                return "tree", store.tree(project_id)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+                results = list(executor.map(read, range(96)))
+
+            for kind, result in results:
+                expected = expected_tree if kind == "tree" else expected_status
+                self.assertEqual(result, expected)
 
     def test_tree_enforces_node_depth_and_size_limits_with_warnings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -165,7 +200,7 @@ class ProjectStoreTests(unittest.TestCase):
             workspace = Path(directory)
             project = workspace / "字幕工程"
             make_project(project)
-            target = project / "宣发/字幕/演示.srt"
+            target = project / "剧集/EP001/storyboard/预演.srt"
             target.parent.mkdir(parents=True)
             target.write_text(
                 "1\n00:00:00,000 --> 00:00:01,000\n第一句\n",
@@ -174,10 +209,10 @@ class ProjectStoreTests(unittest.TestCase):
             store = self.store(workspace)
             project_id = store.discover()[0][0]["id"]
 
-            opened = store.read_text(project_id, "宣发/字幕/演示.srt")
+            opened = store.read_text(project_id, "剧集/EP001/storyboard/预演.srt")
             result = store.write_text(
                 project_id,
-                "宣发/字幕/演示.srt",
+                "剧集/EP001/storyboard/预演.srt",
                 "1\n00:00:00,000 --> 00:00:01,200\n第一句\n",
                 opened["version"],
             )
@@ -627,9 +662,9 @@ class ProjectStoreTests(unittest.TestCase):
             workspace = Path(directory)
             project = workspace / "show"
             make_project(project)
-            promo = project / "promo"
-            promo.mkdir()
-            (promo / "clip.mp4").write_bytes(b"PROJECT-MEDIA")
+            storyboard = project / "episodes/EP001/storyboard"
+            storyboard.mkdir(parents=True)
+            (storyboard / "clip.mp4").write_bytes(b"PROJECT-MEDIA")
             outside = workspace / "outside"
             outside.mkdir()
             outside_target = outside / "clip.mp4"
@@ -643,9 +678,9 @@ class ProjectStoreTests(unittest.TestCase):
             @contextlib.contextmanager
             def swap_parent(root_fd: int, relative: PurePosixPath):
                 nonlocal swapped
-                if relative.as_posix() == "promo/clip.mp4" and not swapped:
-                    promo.rename(project / "promo-original")
-                    promo.symlink_to(outside, target_is_directory=True)
+                if relative.as_posix() == "episodes/EP001/storyboard/clip.mp4" and not swapped:
+                    storyboard.rename(project / "storyboard-original")
+                    storyboard.symlink_to(outside, target_is_directory=True)
                     swapped = True
                 with original_open_parent(root_fd, relative) as opened:
                     yield opened
@@ -654,7 +689,7 @@ class ProjectStoreTests(unittest.TestCase):
                 dashboard_server, "_open_parent_directory_at", swap_parent
             ):
                 with self.assertRaises(DashboardError) as caught:
-                    store.open_media(project_id, "promo/clip.mp4")
+                    store.open_media(project_id, "episodes/EP001/storyboard/clip.mp4")
 
             self.assertEqual(caught.exception.status, 403)
             self.assertEqual(outside_target.read_bytes(), b"OUTSIDE-SECRET")
@@ -730,9 +765,12 @@ class DashboardEntrypointTests(unittest.TestCase):
         )
 
         for element_id in (
-            "textCount",
-            "promoCount",
-            "referenceCount",
+            "allCount",
+            "developmentCount",
+            "writingCount",
+            "assetsCount",
+            "storyboardCount",
+            "reviewCount",
             "fileMeta",
             "projectTitle",
             "axisCount",
@@ -745,8 +783,11 @@ class DashboardEntrypointTests(unittest.TestCase):
         self.assertIn('development: "项目开发"', javascript)
         self.assertIn('bible: "设定集"', javascript)
         self.assertIn('episodes: "剧集"', javascript)
-        self.assertIn('publicity: "宣发"', javascript)
+        self.assertIn('"creator-decisions": "创作者决策"', javascript)
+        self.assertIn("sectionOf", javascript)
         self.assertIn("displayPath", javascript)
+        self.assertNotIn("宣发素材", html)
+        self.assertNotIn('data-domain="promo"', html)
         self.assertNotIn("SHORT DRAMA SUITE", html)
         self.assertNotIn("PROJECT HEALTH", html)
         for forbidden_copy in (
@@ -767,8 +808,8 @@ class DashboardEntrypointTests(unittest.TestCase):
         script = f"""
 const logic = require({json.dumps(str(app))});
 const result = {{
-  filenameOnly: logic.mediaBadge("宣发/final.mp4", "video"),
-  accepted: logic.mediaBadge("宣发/final.mp4", "video", {{
+  filenameOnly: logic.mediaBadge("剧集/EP001/storyboard/final.mp4", "video"),
+  accepted: logic.mediaBadge("剧集/EP001/storyboard/final.mp4", "video", {{
     creator_acceptance: "accepted",
     independent_review: "approve",
     delivery_gate: "ready"
@@ -784,6 +825,8 @@ const result = {{
   typedDuringSave: logic.savedContentIsCurrent("sent", "sent plus more"),
   unknownTone: logic.toneFor({{not_evaluated: 1}}),
   failedTone: logic.toneFor({{fail: 1}}),
+  legacyCheckpoint: logic.checkpointLabel("demo-ready"),
+  unknownCheckpoint: logic.checkpointLabel("custom-stage"),
   refreshFailure: logic.statusRefreshFailureMessage()
 }};
 process.stdout.write(JSON.stringify(result));
@@ -796,7 +839,7 @@ process.stdout.write(JSON.stringify(result));
         )
         result = json.loads(completed.stdout)
 
-        self.assertEqual(result["filenameOnly"], ["生成视频 · 待审", "warning"])
+        self.assertEqual(result["filenameOnly"], ["视频素材 · 待审", "warning"])
         self.assertEqual(result["accepted"], ["正式成片", "success"])
         self.assertEqual(result["emptyDelivery"]["value"], "尚无可交付产物")
         self.assertEqual(result["pendingDelivery"]["tone"], "warning")
@@ -806,7 +849,75 @@ process.stdout.write(JSON.stringify(result));
         self.assertFalse(result["typedDuringSave"])
         self.assertEqual(result["unknownTone"], "warning")
         self.assertEqual(result["failedTone"], "danger")
+        self.assertEqual(result["legacyCheckpoint"], "分镜制作")
+        self.assertEqual(result["unknownCheckpoint"], "custom-stage")
         self.assertIn("状态刷新失败", result["refreshFailure"])
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
+    def test_frontend_sections_follow_project_artifact_ownership(self) -> None:
+        app = dashboard_server.STATIC_ROOT / "app.js"
+        script = f"""
+const logic = require({json.dumps(str(app))});
+const paths = [
+  "short-drama.json",
+  "README.md",
+  "demo.mp4",
+  "输入/original-source.txt",
+  "inputs/original-source.txt",
+  "references/demo.mp4",
+  "参考/demo.png",
+  "项目开发/story-engine.md",
+  "development/story-engine.md",
+  "Development/story-engine.md",
+  "剧集/EP001/screenplay.md",
+  "episodes/EP001/screenplay.md",
+  "Episodes/EP001/screenplay.md",
+  "剧集/EP001/notes.md",
+  "设定集/characters.jsonl",
+  "剧集/EP001/assets/image-prompts.md",
+  "剧集/EP001/storyboard/shots.jsonl",
+  "剧集/EP001/media/demo.mp4",
+  "创作者决策/EP001-script.json",
+  "审查/EP001-findings.jsonl",
+  "交付/EP001/manifest.json",
+  "宣发/campaign.md"
+];
+process.stdout.write(JSON.stringify(paths.map((path) => logic.sectionOf(path))));
+"""
+        completed = subprocess.run(
+            ["node", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            json.loads(completed.stdout),
+            [
+                "development",
+                "development",
+                "other",
+                "development",
+                "development",
+                "other",
+                "other",
+                "development",
+                "development",
+                "other",
+                "writing",
+                "writing",
+                "other",
+                "other",
+                "assets",
+                "assets",
+                "storyboard",
+                "other",
+                "review",
+                "review",
+                "review",
+                "other",
+            ],
+        )
 
     def test_open_flag_is_opt_in(self) -> None:
         class FakeServer:
@@ -1045,13 +1156,13 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(self.project.joinpath("notes.md").stat().st_size, len(content))
 
     def test_media_endpoint_serves_complete_image_with_safe_headers(self) -> None:
-        media = self.project / "promo/poster.png"
-        media.parent.mkdir()
+        media = self.project / "episodes/EP001/assets/poster.png"
+        media.parent.mkdir(parents=True)
         image = b"\x89PNG\r\n\x1a\npreview-bytes"
         media.write_bytes(image)
         project_id = self.project_id()
         status, _, body = self.request(
-            "GET", f"/api/media?project={project_id}&path=promo%2Fposter.png"
+            "GET", f"/api/media?project={project_id}&path=episodes%2FEP001%2Fassets%2Fposter.png"
         )
         self.assertEqual(status, 200)
         payload = json.loads(body)
@@ -1074,12 +1185,12 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(headers["Content-Length"], str(len(image)))
 
     def test_video_content_supports_single_byte_ranges(self) -> None:
-        media = self.project / "promo/demo.mp4"
-        media.parent.mkdir()
+        media = self.project / "episodes/EP001/storyboard/demo.mp4"
+        media.parent.mkdir(parents=True)
         video = b"0123456789"
         media.write_bytes(video)
         project_id = self.project_id()
-        path = f"/api/media/content?project={project_id}&path=promo%2Fdemo.mp4"
+        path = f"/api/media/content?project={project_id}&path=episodes%2FEP001%2Fstoryboard%2Fdemo.mp4"
 
         status, headers, body = self.request(
             "GET", path, headers={"Range": "bytes=2-5"}
@@ -1105,8 +1216,8 @@ class DashboardHTTPTests(unittest.TestCase):
     def test_media_content_reuses_path_and_request_security_boundaries(self) -> None:
         outside = self.workspace / "outside.png"
         outside.write_bytes(b"outside")
-        linked = self.project / "promo/linked.png"
-        linked.parent.mkdir()
+        linked = self.project / "episodes/EP001/assets/linked.png"
+        linked.parent.mkdir(parents=True)
         try:
             linked.symlink_to(outside)
         except OSError:
@@ -1115,7 +1226,7 @@ class DashboardHTTPTests(unittest.TestCase):
 
         status, _, _ = self.request(
             "GET",
-            f"/api/media/content?project={project_id}&path=promo%2Flinked.png",
+            f"/api/media/content?project={project_id}&path=episodes%2FEP001%2Fassets%2Flinked.png",
         )
         self.assertEqual(status, 403)
         status, _, _ = self.request(
@@ -1125,7 +1236,7 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(status, 400)
         status, _, _ = self.request(
             "GET",
-            f"/api/media/content?project={project_id}&path=promo%2Flinked.png",
+            f"/api/media/content?project={project_id}&path=episodes%2FEP001%2Fassets%2Flinked.png",
             headers={"Origin": "http://evil.example"},
         )
         self.assertEqual(status, 403)

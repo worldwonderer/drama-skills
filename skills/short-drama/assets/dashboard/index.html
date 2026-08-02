@@ -27,10 +27,13 @@
         <kbd>/</kbd>
       </div>
       <div id="warnings" class="warnings" aria-live="polite"></div>
-      <nav class="domains" aria-label="文件域">
-        <button class="domain active" data-domain="text" aria-pressed="true"><span>项目文本</span><b id="textCount">0</b></button>
-        <button class="domain" data-domain="promo" aria-pressed="false"><span>宣发素材</span><b id="promoCount">0</b></button>
-        <button class="domain" data-domain="reference" aria-pressed="false"><span>参考输入</span><b id="referenceCount">0</b></button>
+      <nav class="domains" aria-label="创作阶段">
+        <button class="domain active" data-section="all" aria-pressed="true"><span>全部</span><b id="allCount">0</b></button>
+        <button class="domain" data-section="development" aria-pressed="false"><span>项目开发</span><b id="developmentCount">0</b></button>
+        <button class="domain" data-section="writing" aria-pressed="false"><span>剧本</span><b id="writingCount">0</b></button>
+        <button class="domain" data-section="assets" aria-pressed="false"><span>资产设定</span><b id="assetsCount">0</b></button>
+        <button class="domain" data-section="storyboard" aria-pressed="false"><span>分镜视频</span><b id="storyboardCount">0</b></button>
+        <button class="domain" data-section="review" aria-pressed="false"><span>审查交付</span><b id="reviewCount">0</b></button>
       </nav>
       <div class="list-heading"><span id="resultLabel">文件</span><span id="resultCount">0</span></div>
       <div id="tree" class="tree" aria-live="polite"></div>

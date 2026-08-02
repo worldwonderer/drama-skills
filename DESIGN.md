@@ -3,11 +3,11 @@
 ## Source of truth
 
 - **Status:** Active
-- **Last refreshed:** 2026-08-01
+- **Last refreshed:** 2026-08-02
 - **Primary product surfaces:** `$short-drama dashboard` local project workspace
-- **Evidence reviewed:** `skills/short-drama/assets/dashboard/*`, the running
-  `孤身入魔` demo, lifecycle output from `project_tool.py`, and the local-first
-  file-management model used by oh-story-claudecode.
+- **Evidence reviewed:** `skills/short-drama/assets/dashboard/*`, canonical project
+  roots and declared artifact owners in `project_tool.py`, lifecycle output, and the
+  local-first file-management model used by oh-story-claudecode.
 
 ## Brand
 
@@ -38,10 +38,14 @@
 
 ## Information architecture
 
-- **Primary navigation:** project selector → project text / publicity / references.
+- **Primary navigation:** project selector → all / development / writing / assets /
+  storyboard and video / review and delivery.
 - **Workspace:** grouped file browser → focused text or media viewer → lifecycle rail.
 - **Content hierarchy:** project title and checkpoint first, file content second,
   operational metadata third.
+- **Classification rule:** files follow their canonical project root and episode
+  artifact area; media stays with the artifact it represents. Non-standard folders
+  remain discoverable in All without becoming a product stage.
 
 ## Design principles
 
@@ -65,9 +69,9 @@
 
 ## Components
 
-- **Reuse:** project selector, domain tabs, file list, editor, preview, media viewer,
+- **Reuse:** project selector, stage tabs, file list, editor, preview, media viewer,
   lifecycle summary.
-- **Change:** add project identity, domain/file counts, grouped file rows, selected and
+- **Change:** add project identity, stage/file counts, grouped file rows, selected and
   dirty states, safe Markdown/JSON preview, media facts, refresh and review affordances.
 - **Variants:** editable/read-only/oversize; image/video; normal/pending/blocked/error.
 - **Ownership:** tokens and layout live in `assets/dashboard/styles.css`; browser behavior
@@ -91,7 +95,7 @@
 ## Interaction states
 
 - **Loading:** explicit loading copy on project/file changes.
-- **Empty:** explain when a workspace, domain, or search has no matching files.
+- **Empty:** explain when a workspace, stage view, or search has no matching files.
 - **Error:** show the actionable server message in the live status area.
 - **Success:** saved state includes timestamp and clears the dirty marker.
 - **Disabled:** explain protected or oversize files rather than silently disabling controls.

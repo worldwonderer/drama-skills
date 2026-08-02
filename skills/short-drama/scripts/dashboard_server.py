@@ -266,7 +266,18 @@ class ProjectStore:
                 finally:
                     os.close(child_fd)
 
-        walk_fd(self._workspace_fd, (), 0)
+        # A directory cursor belongs to the open file description, so dup() would
+        # still let concurrent requests advance the same scan. Open `.` relative
+        # to the pinned workspace to give every discovery its own cursor.
+        discovery_fd = os.open(
+            ".",
+            os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=self._workspace_fd,
+        )
+        try:
+            walk_fd(discovery_fd, (), 0)
+        finally:
+            os.close(discovery_fd)
         if node_truncated:
             warnings.append(f"项目发现达到节点上限 {self.max_nodes}，结果已截断")
         if depth_truncated:
@@ -293,7 +304,14 @@ class ProjectStore:
             if selected["path"] == "."
             else self.workspace / selected["path"]
         )
-        descriptor = os.dup(self._workspace_fd)
+        # dup() would share the workspace directory's seek position across
+        # requests. Opening "." creates an independent open-file description,
+        # including when the workspace itself is the selected project.
+        descriptor = os.open(
+            ".",
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=self._workspace_fd,
+        )
         marker_fd = -1
         try:
             for part in PurePosixPath(selected["path"]).parts:

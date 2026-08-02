@@ -50,8 +50,9 @@ const STATE_LABELS = {
 };
 
 const CHECKPOINT_LABELS = {
-  "promo-generation": "宣发生成",
-  "demo-ready": "演示就绪",
+  // Compatibility for local showcase workspaces created before the Dashboard
+  // was aligned to production stages.
+  "demo-ready": "分镜制作",
   development: "项目开发",
   writing: "剧本创作",
   storyboard: "分镜制作",
@@ -63,7 +64,6 @@ const PATH_SEGMENT_LABELS = {
   development: "项目开发",
   bible: "设定集",
   episodes: "剧集",
-  publicity: "宣发",
   "creator-decisions": "创作者决策",
   reviews: "审查",
   inputs: "输入",
@@ -78,6 +78,9 @@ const FILE_LABELS = {
   "short-drama.json": "项目清单.json",
   "creative-brief.md": "创作简报.md",
   "story-engine.md": "故事引擎.md",
+  "director-brief.md": "导演阐述.md",
+  "adaptation-map.jsonl": "改编映射.jsonl",
+  "series-arc.json": "系列弧线.json",
   "episode-map.jsonl": "分集地图.jsonl",
   "characters.jsonl": "角色.jsonl",
   "looks.jsonl": "造型.jsonl",
@@ -86,17 +89,74 @@ const FILE_LABELS = {
   "props.jsonl": "道具.jsonl",
   "prop-states.jsonl": "道具状态.jsonl",
   "episode-card.json": "分集卡.json",
+  "beats.jsonl": "节拍表.jsonl",
   "screenplay.md": "剧本.md",
+  "screenplay-index.jsonl": "剧本索引.jsonl",
+  "voice-record-sheet.jsonl": "配音录制表.jsonl",
+  "occurrences.jsonl": "资产出现表.jsonl",
+  "decisions.jsonl": "资产决策.jsonl",
+  "continuity.jsonl": "连续性变化.jsonl",
+  "image-prompt-specs.jsonl": "图片提示词规格.jsonl",
+  "image-prompts.md": "图片提示词.md",
+  "coverage.json": "覆盖检查.json",
   "shots.jsonl": "镜头表.jsonl",
+  "keyframes.jsonl": "关键帧表.jsonl",
   "keyframe-prompts.md": "关键帧提示词.md",
-  "campaign.md": "宣发方案.md",
-  "generation-jobs.jsonl": "生成记录.jsonl",
-  "previs-review.md": "动态预演验收.md",
-  "teaser-15s-review.md": "上一版15秒审核.md",
-  "teaser-15s-final-review.md": "15秒音画演示验收.md",
-  "video-prompt.md": "视频提示词.md",
-  "video-qc-checklist.md": "视频验收清单.md",
-  "subtitle-review.md": "字幕校对记录.md",
+  "motion-specs.jsonl": "运动规格.jsonl",
+  "delivery-containers.jsonl": "交付容器.jsonl",
+  "video-prompts.md": "视频提示词.md",
+  "manifest.json": "交付清单.json",
+};
+
+const ROOT_ROLES = {
+  inputs: "inputs",
+  "输入": "inputs",
+  development: "development",
+  "项目开发": "development",
+  bible: "bible",
+  "设定集": "bible",
+  episodes: "episodes",
+  "剧集": "episodes",
+  "creator-decisions": "creator-decisions",
+  "创作者决策": "creator-decisions",
+  reviews: "reviews",
+  "审查": "reviews",
+  delivery: "delivery",
+  "交付": "delivery",
+};
+
+const ROOT_DEVELOPMENT_FILES = new Set(["short-drama.json", "readme.md"]);
+const EPISODE_WRITING_FILES = new Set([
+  "episode-card.json",
+  "beats.jsonl",
+  "screenplay.md",
+  "screenplay-index.jsonl",
+  "voice-record-sheet.jsonl",
+]);
+
+const SECTION_COUNT_IDS = {
+  development: "developmentCount",
+  writing: "writingCount",
+  assets: "assetsCount",
+  storyboard: "storyboardCount",
+  review: "reviewCount",
+};
+
+const ROOT_ORDER = {
+  root: 0,
+  inputs: 1,
+  development: 2,
+  bible: 3,
+  episodes: 4,
+  "creator-decisions": 5,
+  reviews: 6,
+  delivery: 7,
+};
+
+const EPISODE_AREA_ORDER = {
+  writing: 0,
+  assets: 1,
+  storyboard: 2,
 };
 
 function displaySegment(segment, isFile = false) {
@@ -111,17 +171,32 @@ function displayPath(path) {
     .join("/");
 }
 
-function domainOf(path, type) {
-  if (/(^|\/)(references?|inputs?|research|参考|输入)(\/|$)/i.test(path)) {
-    return "reference";
+function rootRole(segment) {
+  return ROOT_ROLES[segment] || null;
+}
+
+function checkpointLabel(checkpoint) {
+  return CHECKPOINT_LABELS[checkpoint] || checkpoint || "—";
+}
+
+function sectionOf(path) {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length < 2) {
+    return ROOT_DEVELOPMENT_FILES.has((parts[0] || "").toLowerCase())
+      ? "development"
+      : "other";
   }
-  if (
-    type === "media" ||
-    /(^|\/)(promo|marketing|publicity|delivery|宣发|交付)(\/|$)/i.test(path)
-  ) {
-    return "promo";
-  }
-  return "text";
+  const role = rootRole(parts[0]);
+  if (["inputs", "development"].includes(role)) return "development";
+  if (role === "bible") return "assets";
+  if (["creator-decisions", "reviews", "delivery"].includes(role)) return "review";
+  if (role !== "episodes") return "other";
+
+  const episodeArea = (parts[2] || "").toLowerCase();
+  if (["assets", "资产"].includes(episodeArea)) return "assets";
+  if (["storyboard", "分镜"].includes(episodeArea)) return "storyboard";
+  if (parts.length === 3 && EPISODE_WRITING_FILES.has(episodeArea)) return "writing";
+  return "other";
 }
 
 function formatBytes(size) {
@@ -139,6 +214,20 @@ function pathParts(path) {
     parent: parts.map((part) => displaySegment(part)).join("/") || "项目根目录",
     group: displaySegment(parts[0] || "项目根目录"),
   };
+}
+
+function groupOf(path) {
+  const parts = path.split("/").filter(Boolean);
+  if (rootRole(parts[0] || "") === "episodes" && parts[1]) return parts[1];
+  return pathParts(path).group;
+}
+
+function fileOrder(path) {
+  const parts = path.split("/").filter(Boolean);
+  const role = parts.length < 2 ? "root" : rootRole(parts[0]) || "other";
+  const rootIndex = ROOT_ORDER[role] ?? 99;
+  const episodeIndex = role === "episodes" ? EPISODE_AREA_ORDER[sectionOf(path)] ?? 9 : 0;
+  return `${String(rootIndex).padStart(2, "0")}:${parts[1] || ""}:${episodeIndex}:${path}`;
 }
 
 function toneFor(states) {
@@ -251,12 +340,16 @@ function cleanupMedia() {
   $("media").replaceChildren();
 }
 
-function renderDomainCounts() {
-  const counts = { text: 0, promo: 0, reference: 0 };
-  for (const file of state.files) counts[domainOf(file.path, file.type)] += 1;
-  $("textCount").textContent = counts.text;
-  $("promoCount").textContent = counts.promo;
-  $("referenceCount").textContent = counts.reference;
+function renderSectionCounts() {
+  const counts = Object.fromEntries(Object.keys(SECTION_COUNT_IDS).map((key) => [key, 0]));
+  for (const file of state.files) {
+    const section = sectionOf(file.path);
+    if (section in counts) counts[section] += 1;
+  }
+  $("allCount").textContent = state.files.length;
+  for (const [section, id] of Object.entries(SECTION_COUNT_IDS)) {
+    $(id).textContent = counts[section];
+  }
 }
 
 function fileIcon(file) {
@@ -269,16 +362,18 @@ function fileIcon(file) {
 }
 
 function renderFiles() {
-  const domain = document.querySelector(".domain.active").dataset.domain;
+  const activeSection = document.querySelector(".domain.active").dataset.section;
   const term = $("search").value.trim().toLowerCase();
-  const filtered = state.files.filter(
-    (file) =>
-      domainOf(file.path, file.type) === domain &&
-      `${file.path} ${displayPath(file.path)}`.toLowerCase().includes(term),
-  );
+  const filtered = state.files
+    .filter(
+      (file) =>
+        (activeSection === "all" || sectionOf(file.path) === activeSection) &&
+        `${file.path} ${displayPath(file.path)}`.toLowerCase().includes(term),
+    )
+    .sort((left, right) => fileOrder(left.path).localeCompare(fileOrder(right.path), "zh-CN"));
   const groups = new Map();
   for (const file of filtered) {
-    const group = pathParts(file.path).group;
+    const group = groupOf(file.path);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(file);
   }
@@ -321,11 +416,13 @@ function renderFiles() {
   if (!content.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = term ? "没有匹配的文件" : "这个分区还没有文件";
+    empty.textContent = term ? "没有匹配的文件" : "这个创作阶段还没有文件";
     content.push(empty);
   }
   $("resultCount").textContent = filtered.length;
-  $("resultLabel").textContent = term ? `“${$("search").value.trim()}”` : "文件";
+  $("resultLabel").textContent = term
+    ? `“${$("search").value.trim()}”`
+    : document.querySelector(".domain.active span").textContent;
   $("tree").replaceChildren(...content);
 }
 
@@ -501,7 +598,7 @@ function mediaBadge(path, kind, lifecycle = null) {
     return ["已退回", "danger"];
   }
   if (/demo|演示/i.test(path) && kind === "video") return ["音画演示", "info"];
-  if (kind === "video") return ["生成视频 · 待审", "warning"];
+  if (kind === "video") return ["视频素材 · 待审", "warning"];
   return ["视觉资产", "info"];
 }
 
@@ -702,7 +799,7 @@ function renderStatus(status) {
   $("summary").replaceChildren(
     summaryCard(
       "当前检查点",
-      CHECKPOINT_LABELS[status.current_checkpoint] || status.current_checkpoint || "—",
+      checkpointLabel(status.current_checkpoint),
       "工作流当前位置",
       "info",
     ),
@@ -742,7 +839,7 @@ async function selectProject(id, preferredPath = "") {
     if (sequence !== state.loadSequence) return;
     state.files = flatten(tree.tree);
     $("warnings").textContent = tree.warnings.join("\n");
-    renderDomainCounts();
+    renderSectionCounts();
     renderFiles();
     renderStatus(status);
     const selectedOption = $("projects").selectedOptions[0];
@@ -750,7 +847,8 @@ async function selectProject(id, preferredPath = "") {
     const initial =
       state.files.find((file) => file.path === preferredPath) ||
       state.files.find((file) => file.path.toLowerCase() === "readme.md") ||
-      state.files.find((file) => domainOf(file.path, file.type) === "text");
+      state.files.find((file) => sectionOf(file.path) === "development") ||
+      state.files[0];
     if (initial) {
       await openFile(initial);
     } else {
@@ -891,9 +989,11 @@ function start() {
 if (typeof document !== "undefined") start();
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    checkpointLabel,
     deliverySummary,
     mediaBadge,
     savedContentIsCurrent,
+    sectionOf,
     statusRefreshFailureMessage,
     toneFor,
   };

@@ -148,6 +148,9 @@ aside,
 
 .navigator {
   padding: 16px 14px;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
   border-right: 1px solid var(--line);
   background: #0b0f15;
 }
@@ -200,7 +203,7 @@ kbd {
 
 .domain {
   min-width: 0;
-  min-height: 52px;
+  min-height: 48px;
   padding: 7px 5px;
   display: flex;
   flex-direction: column;
@@ -242,7 +245,8 @@ kbd {
 }
 
 .tree {
-  height: calc(100% - 132px);
+  min-height: 0;
+  flex: 1;
   padding-right: 3px;
   overflow: auto;
   scrollbar-color: #323d50 transparent;

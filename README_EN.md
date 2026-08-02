@@ -14,16 +14,17 @@ The output is text: scripts, asset notes, prompts, review records.
 ## Demo
 
 The *Lone Fall into Demonhood* showcase adapts a mature costume-fantasy project
-into project setting records, two episode scripts, twelve storyboard panels,
-publicity artwork, and one 15-second vertical video — a continuous shot following
-Gu Lin carrying a crystal coffin toward the border.
+into project setting records, two episode scripts, and twelve storyboard panels.
+The 15-second vertical video below was made separately as a temporary showcase for
+this project. It follows Gu Lin carrying a crystal coffin toward the border in one
+continuous shot; it is not a default suite artifact.
 
-https://github.com/worldwonderer/drama-skills/releases/download/v0.2.0/gushenrumo-15s-demo.mp4
+https://github.com/user-attachments/assets/ae88b444-06e5-4964-856c-91e619020f12
 
 15.000 seconds · 720×1280 · 24 fps · H.264 + AAC, with Mandarin dialogue,
 environmental sound, music, and burned-in Chinese subtitles.
 
-![Chinese project dashboard previewing the finished demo](docs/assets/dashboard-zh.png)
+![Chinese project dashboard browsing the showcase by production artifact](docs/assets/dashboard-zh.png)
 
 That screenshot is the local project dashboard that ships with the repo — see below.
 
@@ -41,10 +42,10 @@ producers maintain projects and write prompts directly through an agent CLI over
 plain files, confirming the prompts before anything goes to generation. It works
 noticeably better. What is left of the in-house tooling is the generation queue.
 
-**Image and video generation are deliberately out of scope:** the suite does not
-call image, video, or audio generation services. That step is far too easy to jump
-straight to — prompts landing in files first, confirmed by a person, and only then
-sent to generation is the part of this workflow that carries the weight.
+**Image and video generation are deliberately out of scope:** to prevent unreviewed
+prompts from accidentally triggering paid generation and wasting budget, the suite
+does not call image, video, or audio generation services. Prompts land in files,
+receive human confirmation, and only then move to generation.
 
 ## Install
 
@@ -157,5 +158,8 @@ One line inside your agent (Codex writes `$short-drama dashboard`):
 ```
 
 The skill picks the project, allocates a loopback port, and opens the browser. The
-dashboard browses and lightly edits project text, previews images and video
-read-only, and shows project status. It runs locally only, and needs macOS or Linux.
+dashboard follows the real workspace and artifact chain with six views: All,
+Development, Scripts, Asset Settings, Storyboard & Video, and Review & Delivery.
+It browses and lightly edits project text, previews images and video in their actual
+stage directories read-only, and shows project status. Ad-hoc files remain available
+under All. It runs locally only, and needs macOS or Linux.

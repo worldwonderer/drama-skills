@@ -64,8 +64,8 @@ MAX_TEXT_EXCEPTION_LENGTH = 200
 STATE_FILE = Path(".short-drama/state.json")
 OPERATIONS_DIR = Path(".short-drama")
 ABSENT_HASH: None = None
-# One literal owns the eight stage roots; every other view of them is derived.
-# Spelling the set out per view is how a ninth role ends up in PROJECT_DIRS —
+# One literal owns the project roots; every other view of them is derived.
+# Spelling the set out per view is how an unrelated role ends up in PROJECT_DIRS —
 # so `init` creates the directory — but missing from the alias table, so
 # `_validate_publication_layout` then refuses every write into it.
 CANONICAL_ROOTS = {
@@ -76,7 +76,6 @@ CANONICAL_ROOTS = {
     "delivery": "交付",
     "creator-decisions": "创作者决策",
     "reviews": "审查",
-    "publicity": "宣发",
 }
 # Projects created before the Chinese layout name each directory after its role,
 # so the legacy view is the identity map.
@@ -888,12 +887,12 @@ def project_layout(path: Path) -> dict[str, Any]:
 
 
 def _validate_project_output_layout(root: Path, relatives: Iterable[str]) -> str | None:
-    # Only the roots that can *prove* a layout may choose one. `宣发/` and
-    # `输入/` are excluded from detection (LAYOUT_PINNING_ROLES), so letting
-    # them pin would record a family no directory on disk supports — one
-    # `--allow-unregistered-path` write into `publicity/` would lock a
-    # brand-new all-Chinese project into legacy and refuse every later
-    # Chinese publish, with no supported way to undo it.
+    # Only the roots that can *prove* a layout may choose one. `输入/` and
+    # unregistered roots are excluded from detection (LAYOUT_PINNING_ROLES), so
+    # letting them pin would record a family no stage directory on disk supports —
+    # one `--allow-unregistered-path` write into an ad-hoc English directory
+    # would lock a brand-new all-Chinese project into legacy and refuse every
+    # later Chinese publish, with no supported way to undo it.
     families = {
         family
         for relative in relatives

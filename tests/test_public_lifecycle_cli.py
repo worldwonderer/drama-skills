@@ -185,9 +185,9 @@ class PublicLifecycleCliTests(unittest.TestCase):
                 "交付",
                 "创作者决策",
                 "审查",
-                "宣发",
             ):
                 self.assertTrue((root / relative).is_dir(), relative)
+            self.assertFalse((root / "宣发").exists())
             for legacy in ("inputs", "development", "bible", "episodes", "delivery"):
                 self.assertFalse((root / legacy).exists(), legacy)
 
@@ -340,7 +340,7 @@ class PublicLifecycleCliTests(unittest.TestCase):
             self.assertEqual(layout["nonstandardRoots"], ["Episodes"])
 
     def test_a_non_pinning_root_cannot_choose_the_project_layout(self) -> None:
-        # `宣发/` and `输入/` are excluded from layout *detection*, so they must
+        # Unregistered roots and `输入/` are excluded from layout *detection*, so they must
         # not be able to *pin* one either. A single --allow-unregistered-path
         # write into `publicity/` used to record legacy for the whole project —
         # while no legacy directory existed — and every later Chinese publish
@@ -359,6 +359,7 @@ class PublicLifecycleCliTests(unittest.TestCase):
             layout = project_tool.project_status(root)["layout"]
             self.assertFalse(layout["pinned"])
             self.assertEqual(layout["mode"], "canonical")
+            self.assertNotIn("publicity", layout["roots"])
 
             project_tool.publish_candidate(
                 root,
