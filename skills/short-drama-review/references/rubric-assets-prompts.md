@@ -24,6 +24,35 @@ but they do not prove beauty, ugliness, body type, skin tone, or facial morality
 Fail when protagonist/antagonist status silently invents those identity traits;
 creator-approved idealization or deliberate counter-casting remains a taste choice.
 
+### Voice direction (optional, `AST-07`–`AST-12`)
+
+Only reviewed when a project records `voice_direction`. Timbre is carried by a
+bound reference recording, not by prose: identity is the reference binding plus
+the accepted pronunciations, and the text alongside it exists to select or judge
+a candidate, never to stand in for one.
+
+Fail when:
+
+- a project has no reference and a paragraph of adjectives is standing in for
+  identity — that record must read `reference: null` and 待选型 instead;
+- a binding omits what it controls and what it must not, or lets the take's
+  emotion, the recording space (reverb, mic distance) or background noise into
+  identity (`AST-08`);
+- a claim about what is audible in a reference has no creator description and no
+  authorized listening observation, yet admission is not `unverified` (`AST-09`);
+- one proper noun appears with two accepted spellings anywhere in the 设定集
+  (`AST-10`) — this one is structural and blocks;
+- two characters designed together are bound to confusable references and no
+  distinguishing trait names the nearest neighbour (`AST-11`);
+- a selection criterion is an emotion word, carries no counter-example, or the
+  list has grown past a handful (`AST-12`);
+- reference audio bytes, a provider parameter, a model name, a task field or a
+  URL appear in the 设定集 or the delivery package.
+
+The rendered `voice-casting.md` is a cache. A finding against it is a finding
+against the accepted record it projects, routed to assets — never a request to
+hand-edit the derived text.
+
 ### Location / View
 
 Identity: architecture, layout, entrances, zones, anchors, materials, navigation.

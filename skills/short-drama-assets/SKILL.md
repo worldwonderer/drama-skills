@@ -1,6 +1,6 @@
 ---
 name: short-drama-assets
-description: "从短剧剧本拆解并统筹角色/造型、场景/视图、道具/状态和跨场连续性。用户说‘拆角色/场景/道具’、‘做资产表/角色表/场景表/道具表’、‘判断复用还是新变体’、‘更新造型/道具状态’，或拿现成剧本直接做视觉资产准备时使用；本 skill 不写资产图提示词，也不生成图片或视频。"
+description: "从短剧剧本拆解并统筹角色/造型、场景/视图、道具/状态、可选的角色声音方向和跨场连续性。用户说‘拆角色/场景/道具’、‘做资产表/角色表/场景表/道具表’、‘判断复用还是新变体’、‘更新造型/道具状态’、‘给角色定声音/音色/绑定参考音频/做配音选角表’，或拿现成剧本直接做视觉资产准备时使用；本 skill 不写资产图提示词，不生成图片或视频，也不合成音频、不调用任何语音服务。"
 license: MIT
 ---
 
@@ -32,6 +32,9 @@ license: MIT
   `short-drama-storyboard`，图片提示词归 `short-drama-image-prompts`。
 - 可直接接收现成剧本，不强迫补创意开发、故事引擎或集纲。
 - 只产出文本/JSONL；不调用图片、视频、音频模型或 provider API。
+- 创作者可读的产物跟随项目 `short-drama.json#/language`。本阶段不产生送给生成器的
+  提示词正文，与 `#/format/prompt_language` 无关；角色实际说什么语言来自
+  `voice_direction.language`，与两者都无关。
 
 所有权边界见 [阶段契约](references/stage-contract.md)；只在需要时加载
 下列专项参考，不要一次读完所有文件。
@@ -90,6 +93,8 @@ license: MIT
 
 - Character / Look：`references/character-and-look.md`；例见
   `assets/character-look.example.jsonl`
+- 声音方向（可选，项目需要跨集保持声音时）：`references/voice-direction.md`；
+  音色载体是参考音频；该文件同时说明 `设定集/voice-casting.md` 怎么渲染。只在处理声音时加载
 - Location / View：`references/location-and-view.md`；例见
   `assets/location-view.example.jsonl`
 - Prop / State：`references/prop-and-state.md`；例见
@@ -128,6 +133,8 @@ accepted snapshot，且不得交付。
 ### 7. 发布与修订
 
 发布至 `设定集/*.jsonl` 及 `剧集/<EP>/assets/{occurrences,decisions,continuity}.jsonl`。
+项目记录了 `voice_direction` 时，`设定集/voice-casting.md` 由已接受记录重新渲染——
+它是派生文本，手改不会改变任何身份，下一次渲染就会被覆盖。参考音频本身留在 `输入/`。
 每个非权威重复值都携带 owner artifact/hash/field pointer。资产修改后只标记依赖该
 ID/variant 的提示词、镜头和 review 为 stale；不要重写无关资产或 screenplay。
 

@@ -77,6 +77,11 @@
 | AST-05 | structural_invariant | Every downstream binding resolves to an accepted identity and valid variant. |
 | AST-06 | craft_default | Track only asset facts needed for recognition, reuse, prompt writing, or continuity. |
 | AST-07 | reviewed_invariant | Persistent voice identity and pronunciation refs stay separate from scene-level breath, emotion, volume, and delivery state. |
+| AST-08 | reviewed_invariant | A voice reference binding states what it controls and what it must not; the take's emotion, its recording space, and its background never enter identity. |
+| AST-09 | reviewed_invariant | A claim about what is audible in a reference requires a creator or rights-holder description, or an authorized listening observation bound to the inspected bytes; otherwise admission stays unverified. |
+| AST-10 | structural_invariant | An accepted pronunciation of a proper noun appears in exactly one spelling across the 设定集. |
+| AST-11 | reviewed_invariant | Characters designed together are not bound to confusable references; each names the audible trait telling it apart from its nearest neighbour, and names that character. |
+| AST-12 | craft_default | Selection criteria are few, audible and counter-exampled; they judge a candidate reference or a clone result, they do not stand in for one. |
 
 ### `CON`
 

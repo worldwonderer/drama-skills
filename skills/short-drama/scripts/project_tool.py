@@ -174,6 +174,11 @@ DECLARED_PROJECT_ARTIFACT_OWNERS: dict[str, str] = {
     "bible/location-views.jsonl": "short-drama-assets",
     "bible/props.jsonl": "short-drama-assets",
     "bible/prop-states.jsonl": "short-drama-assets",
+    # A casting sheet rendered from accepted voice_direction, owned by the same
+    # stage that owns the identity it projects. Timbre itself is carried by a
+    # reference recording bound in the character record; this file is the
+    # derived text a voice director or a cloning operator reads.
+    "bible/voice-casting.md": "short-drama-assets",
 }
 # Same, for the path below `episodes/<EP>/`.
 DECLARED_EPISODE_ARTIFACT_OWNERS: dict[str, str] = {
