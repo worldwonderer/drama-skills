@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/github/license/worldwonderer/drama-skills)](LICENSE)
 
-面向编剧、漫剧工作室和编导的 AI 短剧创作工作流。八个技能把一个点子或一部长篇材料，
+面向编剧、漫剧工作室和编导的 AI 短剧创作工作流。九个技能把一个点子或一部长篇材料，
 一路做成分集剧本、资产设定、图片提示词、分镜关键帧、视频提示词和独立审查记录，
 全程用同一套创作者决策、来源引用与连续性契约衔接。适配 Claude Code、Codex 和其他
 支持 Agent Skill 规范的运行环境。
@@ -45,7 +45,7 @@ Codex 等支持导入 GitHub 仓库的智能体：
 ```
 
 <details>
-<summary>手动链接（八个技能目录必须保持同级）</summary>
+<summary>手动链接（九个技能目录必须保持同级）</summary>
 
 ```bash
 git clone https://github.com/worldwonderer/drama-skills.git && cd drama-skills
@@ -73,6 +73,9 @@ done
 ## 快速开始
 
 ```
+# 0. 有原著时（可选）：先抽样快评，再决定要不要全量拆
+用 $short-drama-novel-analyze 快评 输入/这本小说.txt，先告诉我值不值得拆
+
 # 1. 新建项目
 用 $short-drama 初始化一个都市打脸题材的短剧项目，竖屏 9:16
 
@@ -92,13 +95,14 @@ done
 
 一集完整的摘录链条见 [demo/](demo/)：剧本 → 资产设定 → 分镜 → 视频提示词。
 
-## 八个技能
+## 九个技能
 
 ```mermaid
 flowchart LR
     classDef phase fill:#e8f4fd,color:#1a1a2e,stroke:#4a9be8,stroke-width:1px
     classDef final fill:#fce4ec,color:#333,stroke:#e57373,stroke-width:1px
 
+    nva["原著分析<br/>$short-drama-novel-analyze"]:::phase
     dev["故事开发<br/>$short-drama-develop"]:::phase
     write["分集剧本<br/>$short-drama-write"]:::phase
     assets["资产决策<br/>$short-drama-assets"]:::phase
@@ -108,6 +112,7 @@ flowchart LR
     rev["独立审查<br/>$short-drama-review"]:::final
     pkg["文本交付包"]:::final
 
+    nva -.有原著时.-> dev
     dev -.可选.-> write --> assets
     assets --> img
     assets --> sb --> vid
@@ -118,6 +123,7 @@ flowchart LR
 | 技能 | 职责 |
 |---|---|
 | `short-drama` | 初始化、路由、视觉方向/Look Development、状态、接受/审查生命周期与交付 |
+| `short-drama-novel-analyze` | 长篇原著的抽样改编快评、章节索引、逐章功能提取、剧情单元与节奏、改编价值与分集候选 |
 | `short-drama-develop` | 小说/长材料的可追溯改编、故事引擎、分集地图、导演阐述、题材与钩子手册 |
 | `short-drama-write` | 单集目标、因果节拍、可拍剧本和项目选择的制作稿格式 |
 | `short-drama-assets` | 人物/造型、地点/视图、道具/状态与连续性决策 |
@@ -127,7 +133,9 @@ flowchart LR
 | `short-drama-review` | 结构/内容审查、授权生产观察的项目级校准诊断与独立结论 |
 
 `$short-drama` 是入口路由，负责初始化、继续、恢复和交付，把具体工作转给对应技能。
-现成剧本可以直接进入规范化或资产拆解，点子与长篇材料则从故事开发进入。
+现成剧本可以直接进入规范化或资产拆解，点子从故事开发进入；手上是一部长篇原著时，
+先走 `$short-drama-novel-analyze` 抽样快评，值得拆再拆出分析层与分集候选，
+再由故事开发把它立成改编契约。
 
 三条单帧提示词路径职责不同：项目级 `lookdev_frame` 检验已接受视觉方向；资产提示词固定人物、
 地点、道具的可复用事实；`storyboard` 的关键帧只投影本镜 start（执行方式需要时可增加只投影

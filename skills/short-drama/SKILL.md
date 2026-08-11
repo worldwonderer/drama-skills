@@ -41,7 +41,8 @@ license: MIT
 | 创作者意图 | 路由 |
 |---|---|
 | 开发点子、故事承诺、系列、分集地图 | `$short-drama-develop` |
-| 导入小说/长材料并做可追溯分集与资产候选预览 | `$short-drama-develop` → 接受改编/分集 → `$short-drama-write` → 接受剧本 → `$short-drama-assets` |
+| 导入小说/长材料并做可追溯分集与资产候选预览 | `$short-drama-novel-analyze` → `$short-drama-develop` → 接受改编/分集 → `$short-drama-write` → 接受剧本 → `$short-drama-assets` |
+| 判断一本长篇值不值得改、先看抽样快评 | `$short-drama-novel-analyze` |
 | 写/改单集契约、因果节拍、剧本 | `$short-drama-write` |
 | 拆人物/造型、地点/视图、道具/状态 | `$short-drama-assets` |
 | 写人物/地点/道具/局部修改的图片提示词 | `$short-drama-image-prompts` |

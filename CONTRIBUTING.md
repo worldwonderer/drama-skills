@@ -71,7 +71,7 @@ uv venv --python 3.10 /tmp/floor && \
 
 （`datetime.UTC` 需要 3.11、`zip(strict=)` 需要 3.10，都属于本机能跑、下限跑不了的典型。）
 
-改动 `skills/` 下任何文件后，需重建套件清单（会同步重写 7 个 `suite-ref.json`）：
+改动 `skills/` 下任何文件后，需重建套件清单（会同步重写 8 个 `suite-ref.json`）：
 
 ```bash
 python3 tools/update_suite_manifest.py skills/short-drama

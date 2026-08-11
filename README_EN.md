@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/github/license/worldwonderer/drama-skills)](LICENSE)
 
 An AI short-drama creation suite for screenwriters, motion-comic studios, and
-directors. Eight skills take an idea or a long-form source all the way to episode
+directors. Nine skills take an idea or a long-form source all the way to episode
 scripts, asset decisions, image prompts, storyboard keyframes, video prompts, and
 independent review records — carrying creator decisions, source evidence, and
 continuity through the entire chain. Works with Claude Code, Codex, and other
@@ -54,7 +54,7 @@ Install this skill suite: https://github.com/worldwonderer/drama-skills
 ```
 
 <details>
-<summary>Manual linking (the eight directories must stay siblings)</summary>
+<summary>Manual linking (the nine directories must stay siblings)</summary>
 
 ```bash
 git clone https://github.com/worldwonderer/drama-skills.git && cd drama-skills
@@ -83,6 +83,9 @@ plain language. The two forms are interchangeable in the examples below.
 ## Quick start
 
 ```
+# 0. With a source novel (optional): triage before committing to a full pass
+Use $short-drama-novel-analyze to triage 输入/novel.txt and tell me whether it is worth adapting
+
 # 1. New project
 Use $short-drama to init a vertical 9:16 urban face-slapping short-drama project
 
@@ -106,13 +109,14 @@ Use $short-drama-review to review EP001's script and prompts
 See [demo/](demo/) for one episode's full excerpt chain: script → asset sheets →
 storyboard → video prompts.
 
-## The eight skills
+## The nine skills
 
 ```mermaid
 flowchart LR
     classDef phase fill:#e8f4fd,color:#1a1a2e,stroke:#4a9be8,stroke-width:1px
     classDef final fill:#fce4ec,color:#333,stroke:#e57373,stroke-width:1px
 
+    nva["Source analysis<br/>$short-drama-novel-analyze"]:::phase
     dev["Story development<br/>$short-drama-develop"]:::phase
     write["Episode script<br/>$short-drama-write"]:::phase
     assets["Asset decisions<br/>$short-drama-assets"]:::phase
@@ -122,6 +126,7 @@ flowchart LR
     rev["Independent review<br/>$short-drama-review"]:::final
     pkg["Text delivery package"]:::final
 
+    nva -.with a source.-> dev
     dev -.optional.-> write --> assets
     assets --> img
     assets --> sb --> vid
@@ -132,6 +137,7 @@ flowchart LR
 | Skill | Responsibility |
 |---|---|
 | `short-drama` | Init, routing, visual direction/Look Development, state, acceptance/review lifecycle, delivery |
+| `short-drama-novel-analyze` | Sampled adaptation triage, chapter index, per-chapter function extraction, story units and rhythm, adaptation value, and episode candidates for a long source |
 | `short-drama-develop` | Traceable novel/long-form adaptation, story engine, episode map, director brief, genre & hook playbook |
 | `short-drama-write` | Episode contract, causal beats, performable screenplay, and the project's accepted production dialect |
 | `short-drama-assets` | Character/Look, Location/View, Prop/State, continuity decisions |

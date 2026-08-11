@@ -13,6 +13,12 @@ from typing import Any
 SUITE = Path(__file__).resolve().parents[1]
 VERIFY_TOOL = SUITE / "tools/verify_suite.py"
 UPDATE_TOOL = SUITE / "tools/update_suite_manifest.py"
+# Counted from the shipped manifest rather than written out here, so adding a
+# skill does not silently leave these assertions checking a stale number.
+# test_suite_anatomy pins the manifest list itself against EXPECTED_SKILLS.
+PUBLIC_SKILLS: list[str] = json.loads(
+    (SUITE / "skills/short-drama/suite-manifest.json").read_text(encoding="utf-8")
+)["public_skills"]
 
 
 def import_module_from_path(name: str, path: Path) -> Any:
@@ -57,7 +63,7 @@ class InstallationResolutionTests(unittest.TestCase):
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
             result = json.loads(completed.stdout)
-            self.assertEqual(len(result["checked_skills"]), 8)
+            self.assertEqual(len(result["checked_skills"]), len(PUBLIC_SKILLS))
 
     def test_verifier_checks_each_exposed_symlink_target(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -120,7 +126,7 @@ class InstallationResolutionTests(unittest.TestCase):
             for child in (SUITE / "skills").iterdir()
             if child.is_dir() and child.name != "short-drama"
         ]
-        self.assertEqual(len(children), 7)
+        self.assertEqual(len(children), len(PUBLIC_SKILLS) - 1)
         for child in children:
             with self.subTest(skill=child.name):
                 reference = json.loads((child / "suite-ref.json").read_text(encoding="utf-8"))

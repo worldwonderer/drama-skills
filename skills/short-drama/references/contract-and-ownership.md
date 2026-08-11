@@ -61,6 +61,7 @@ no motion-to-shot or rendered-Markdown-to-spec authority edge.
 | keyframe focal point, composition, camera/lens, frozen staging | storyboard | rendered keyframe prompt is cached |
 | motion order, performance path, camera/audio realization | video-prompts | end report compares with shot out-state |
 | delivery container membership, order, and container duration | video-prompts `delivery-containers.jsonl` | member accepted durations are read-only storyboard projections carrying refs; container duration equals their sum; rendered container text is cached |
+| source analysis layer: chapter index, adaptation triage, story units, entity candidates, adaptation value, episode candidates | novel-analyze `项目开发/source-analysis/` | candidates only; develop turns accepted ones into the adaptation map and contract, and may overturn any of them |
 | finding, verdict, revision request | review | evidence points to reviewed artifact/hash |
 | input-reference or generated-result production observation | creator or authorized observer in project-private evidence | exact project/prompt/spec/reference slots/config only; review may diagnose and route a bounded revision, never generalize it automatically |
 | lifecycle, transactions, snapshots | shared core | metadata and hashes only |

@@ -1,6 +1,6 @@
 ---
 name: short-drama-review
-description: 独立校验与审查文件系统短剧项目中的故事、剧本、资产、连续性、资产图片提示词、分镜、关键帧和视频提示词，并消费有界授权生产观察做当前项目校准。用户提出“审稿/检查剧本”“检查资产或连续性”“检查图片/视频提示词”“审查或诊断模板感”“根据生产观察做项目校准”，或判断一集能否交付文本或 JSON 时使用；只发布审查问题、审查结论和修订要求，不代替负责人修改来源文件。
+description: 独立校验与审查文件系统短剧项目中的原著分析层、故事、剧本、资产、连续性、资产图片提示词、分镜、关键帧和视频提示词，并消费有界授权生产观察做当前项目校准。用户提出“审稿/检查剧本”“检查资产或连续性”“检查图片/视频提示词”“检查原著分析或分集候选”“审查或诊断模板感”“根据生产观察做项目校准”，或判断一集能否交付文本或 JSON 时使用；只发布审查问题、审查结论和修订要求，不代替负责人修改来源文件。
 license: MIT
 ---
 
@@ -25,6 +25,7 @@ license: MIT
 
 声明一个或多个范围：
 
+- `source_analysis`
 - `story_script`
 - `assets_continuity`
 - `image_prompts`
@@ -34,7 +35,10 @@ license: MIT
 - `delivery_privacy`
 - `project_calibration`
 
-只读对应的审查表。完整审查先读
+只读对应的审查表。`source_analysis` 读
+[rubric-source-analysis.md](references/rubric-source-analysis.md)——它审的是原著分析层
+（索引、快评、逐章提取、剧情单元、人物候选、改编价值与分集候选），不审剧本内容，
+也不替 `$short-drama-develop` 决定改编方案。完整审查先读
 [review-method.md](references/review-method.md)，再读三份审查表；制作端常见缺陷
 与各环节判据见 [production-quality-gates.md](references/production-quality-gates.md)。
 有创作者提供或授权形成的生产观察，需要绑定准确版本、诊断并路由项目内校准时读

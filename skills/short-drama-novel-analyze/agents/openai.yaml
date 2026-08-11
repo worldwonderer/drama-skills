@@ -1,0 +1,4 @@
+interface:
+  display_name: "长篇原著分析"
+  short_description: "把长篇小说拆成章节索引、剧情单元与可改编的分集候选清单"
+  default_prompt: "使用 $short-drama-novel-analyze 先给这本小说做改编价值快评，再决定要不要全量拆解。"

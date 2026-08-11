@@ -154,6 +154,18 @@ DECLARED_PROJECT_ARTIFACT_OWNERS: dict[str, str] = {
     "development/episode-map.jsonl": "short-drama-develop",
     "development/lookdev-image-prompt-specs.jsonl": "short-drama-image-prompts",
     "development/lookdev-prompts.md": "short-drama-image-prompts",
+    # Source analysis is a separate layer from the adaptation contract: analysis
+    # can be overturned, an accepted contract cannot. Only the fixed-name files
+    # are declared; per-chapter extractions carry generated names and stay
+    # owner-unconstrained like every other undeclared path.
+    "development/source-analysis/_index.json": "short-drama-novel-analyze",
+    "development/source-analysis/triage.md": "short-drama-novel-analyze",
+    "development/source-analysis/story-units.md": "short-drama-novel-analyze",
+    "development/source-analysis/rhythm-and-emotion.md": "short-drama-novel-analyze",
+    "development/source-analysis/characters.md": "short-drama-novel-analyze",
+    "development/source-analysis/world.md": "short-drama-novel-analyze",
+    "development/source-analysis/adaptation-value.md": "short-drama-novel-analyze",
+    "development/source-analysis/episode-candidates.jsonl": "short-drama-novel-analyze",
     # Cross-episode identity ledgers. Every skill that names these reads them;
     # `short-drama-assets/SKILL.md:130` is the only declared writer.
     "bible/characters.jsonl": "short-drama-assets",
