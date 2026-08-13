@@ -280,6 +280,10 @@ class PackageBlockedError(RuntimeError):
     """Delivery policy rejected one or more selected artifacts."""
 
 
+class NonPortablePathError(ValueError):
+    """A path spelling Win32 rejects, or one that aliases another spelling."""
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -893,13 +897,10 @@ def _has_nonportable_path_component(parts: tuple[str, ...]) -> bool:
 def _relative_path(value: str | Path, *, allow_operations: bool = False) -> str:
     raw = str(value).replace("\\", "/")
     pure = PurePosixPath(raw)
-    if (
-        not raw
-        or pure.is_absolute()
-        or any(part in ("", ".", "..") for part in pure.parts)
-        or _has_nonportable_path_component(pure.parts)
-    ):
+    if not raw or pure.is_absolute() or any(part in ("", ".", "..") for part in pure.parts):
         raise ValueError(f"unsafe project-relative path: {value!s}")
+    if _has_nonportable_path_component(pure.parts):
+        raise NonPortablePathError(f"unsafe project-relative path: {value!s}")
     relative = pure.as_posix()
     if not allow_operations and pure.parts[0].casefold() == ".short-drama":
         raise ValueError("operational state cannot be a publication target")
@@ -926,7 +927,7 @@ def _register_portable_path(
     if previous is not None:
         if allow_exact_duplicate and previous == relative:
             return
-        raise ValueError(
+        raise NonPortablePathError(
             f"{label} paths are not portable aliases: {previous} and {relative}"
         )
     seen[identity] = relative
@@ -952,7 +953,7 @@ def _validate_existing_path_spelling(root: Path, relative: str, *, label: str) -
         aliases = sorted(entry.name for entry in matches if entry.name != part)
         if aliases:
             existing = PurePosixPath(*prefix, aliases[0]).as_posix()
-            raise ValueError(
+            raise NonPortablePathError(
                 f"{label} path spelling aliases an existing path: "
                 f"{relative} conflicts with {existing}"
             )
@@ -1008,16 +1009,28 @@ def _validate_paths_against_tracked_state(
             for raw in values:
                 if not isinstance(raw, str):
                     raise ValueError(f"tracked {key} path is invalid")
-                relative = _relative_path(
-                    raw,
-                    allow_operations=key
-                    in {
-                        "candidate_inputs",
-                        "accepted_inputs",
-                        "candidate_input_records",
-                        "accepted_input_records",
-                    },
-                )
+                try:
+                    relative = _relative_path(
+                        raw,
+                        allow_operations=key
+                        in {
+                            "candidate_inputs",
+                            "accepted_inputs",
+                            "candidate_input_records",
+                            "accepted_input_records",
+                        },
+                    )
+                except NonPortablePathError:
+                    # A project tracked by 0.2.0 may hold a spelling 0.3.0 no
+                    # longer accepts. Scanning it here used to abort every
+                    # publication in that project with a raw ValueError naming
+                    # a path the creator was not touching, and the documented
+                    # migration could not clear it: the spelling lives in
+                    # state.json, so renaming the file changes nothing. Skip it
+                    # instead. No coverage is lost — a new path must itself pass
+                    # `_relative_path`, so it can never fold onto a spelling
+                    # that failed here.
+                    continue
                 _register_portable_path(
                     tracked,
                     relative,
@@ -1027,7 +1040,7 @@ def _validate_paths_against_tracked_state(
     for relative in relatives:
         previous = tracked.get(_portable_path_identity(relative))
         if previous is not None and previous != relative:
-            raise ValueError(
+            raise NonPortablePathError(
                 "new path spelling aliases a tracked project path: "
                 f"{relative} conflicts with {previous}"
             )
@@ -1732,13 +1745,9 @@ def publish_transaction(
             raise ValueError("artifact id cannot be empty")
         apply_lifecycle_changes({}, changes)
         validated_changes[str(artifact_id)] = dict(changes)
-    normalized_output_items = [(_relative_path(key), value) for key, value in outputs.items()]
-    _validate_new_path_set(
-        root,
-        (relative for relative, _ in normalized_output_items),
-        label="publication output",
-    )
-    relative_outputs = dict(normalized_output_items)
+    # Output spellings are checked once, under the lock, together with the read
+    # set and tracked state.
+    relative_outputs = {_relative_path(key): value for key, value in outputs.items()}
     # `_delivery_gate` is an internal argument, not a stage name: `stage` is
     # creator-supplied, so gating on stage == "delivery" would let any caller
     # unlock the packaged tree by naming itself after it. It skips the layout
@@ -2158,8 +2167,7 @@ def recover_transaction(
             # but persist a stable blocker instead of raising forever on recover.
             code = (
                 "NONPORTABLE_LEGACY_PATH"
-                if "unsafe project-relative path" in str(error)
-                or "portable aliases" in str(error)
+                if isinstance(error, NonPortablePathError)
                 else "MANIFEST_INVALID"
             )
             _block_untrusted_transaction(root, transaction_id, code=code)

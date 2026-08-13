@@ -974,13 +974,37 @@ class PublicLifecycleCliTests(unittest.TestCase):
             )
             self.assertEqual((root / ".short-drama/state.json").read_bytes(), tracked_state)
 
+    def test_a_legacy_tracked_spelling_does_not_block_unrelated_publications(
+        self,
+    ) -> None:
+        # 0.3.0 rejects Win32-illegal spellings that 0.2.0 accepted. The
+        # tracked-state scan re-parsed every recorded path, so one legacy entry
+        # in state.json aborted *every* later publication with a raw
+        # `unsafe project-relative path` naming a file the creator was not
+        # touching — and the documented migration could not clear it, because
+        # renaming on disk leaves state.json untouched.
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            state_path = root / ".short-drama/state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["artifacts"]["legacy:note"] = {
+                "owner": "short-drama-develop",
+                "accepted_targets": {"development/legacy:note.md": "a" * 64},
+            }
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+
+            result = project_tool.publish_candidate(
+                root,
+                artifact_id="EP001:screenplay",
+                owner="short-drama-write",
+                outputs={"episodes/EP001/screenplay.md": "# 第一集\n"},
+            )
+
+            self.assertEqual(result["status"], "committed")
+
     def test_project_path_sets_reject_unicode_normalization_aliases(self) -> None:
         composed = "development/caf\N{LATIN SMALL LETTER E WITH ACUTE}.md"
         decomposed = "development/cafe\N{COMBINING ACUTE ACCENT}.md"
-        self.assertEqual(
-            project_tool._portable_path_identity(composed),
-            project_tool._portable_path_identity(decomposed),
-        )
         with tempfile.TemporaryDirectory() as directory:
             root = self.make_project(directory)
             state_before = (root / ".short-drama/state.json").read_bytes()

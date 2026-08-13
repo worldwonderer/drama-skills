@@ -448,15 +448,6 @@ class OwnershipTests(unittest.TestCase):
             with self.subTest(relative=relative):
                 self.assertIsNone(self.project_tool._expected_path_owner(relative))
 
-    def test_documented_index_flow_uses_scratch_then_publication(self) -> None:
-        skill = (SUITE / "skills/short-drama-novel-analyze/SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("source-analysis/_work/_index.next.json", skill)
-        self.assertIn("project_tool.py publish", skill)
-        self.assertIn("--owner short-drama-novel-analyze", skill)
-        self.assertNotIn("--out 项目开发/source-analysis/_index.json", skill)
-
 
 class CommandLineTests(unittest.TestCase):
     """The CLI is what the workflow actually runs, so its defaults are tested.

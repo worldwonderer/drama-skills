@@ -321,10 +321,14 @@ VID-04 非法数值、跨平台路径唯一性、旧事务安全阻断及 Window
 
 0.3.0 新发布的路径不得包含控制字符、Windows 保留设备名、`< > : " | ? *`，分量也不得以
 点或空格结尾，也不得与另一已跟踪路径只在大小写或 Unicode 规范化形式上不同。既有 POSIX
-项目若用了这些拼写，或同时存在 `Notes.md` / `notes.md`、NFC / NFD 等价文件，先合并并
-重命名为唯一拼写，再重新 publish /
-accept / review / package。RC 期间若由错误 owner 发布过 `_progress.md` 或 `chapters/*.md`，由
-`$short-drama-novel-analyze` 重新发布并刷新下游 hash。
+项目里同时存在 `Notes.md` / `notes.md` 或 NFC / NFD 等价文件时，先合并并重命名为唯一
+拼写，再重新 publish / accept / review / package。
+
+**已跟踪的旧拼写不阻断其他产物**：0.2.0 记进 `short-drama.json` 运行状态的 Win32 非法
+拼写会在唯一性检查中跳过，项目其余部分照常发布——新路径本身必须通过同一道校验，不可能
+与被跳过的拼写折叠成同一个文件。该拼写自身要重新发布时改名即可。RC 期间若由错误 owner
+发布过 `_progress.md` 或 `chapters/*.md`，由 `$short-drama-novel-analyze` 重新发布并刷新
+下游 hash。
 
 旧产物里的跨产物引用若已经使用 `*_ref` / `*_refs`，重新发布前补齐 canonical
 ArtifactRef 的 `owner`、`artifact` 与 `hash`。若它原本只是同文件内的记录 ID，改用
@@ -362,8 +366,8 @@ ArtifactRef 的 `owner`、`artifact` 与 `hash`。若它原本只是同文件内
 
 0.3.0 的首个公开发布候选。正式版在候选版之后补齐原著索引失败路径、分析产物所有权、
 结构化引用完整性、VID-04 非法数值、跨平台路径唯一性、旧事务安全阻断及 Windows 交付
-验证；没有新增创作功能或改变 Agent 主导的语义判断边界。预发布标签与 GitHub Release
-继续保留，供升级验证记录追溯。
+验证；没有新增创作功能或改变 Agent 主导的语义判断边界。预发布 GitHub Release 已由
+正式版取代并删除，`v0.3.0-rc.1` 标签继续保留，供升级验证记录追溯。
 
 ## [0.2.0] - 2026-07-27
 
