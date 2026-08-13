@@ -185,7 +185,7 @@
   ],
   "recipe_version": "1.0.0-draft",
   "suite": "short-drama-suite",
-  "suite_version": "0.2.0",
+  "suite_version": "0.3.0-rc.1",
   "trust_boundary": {
     "host_text_inference": true,
     "media_generation": false,

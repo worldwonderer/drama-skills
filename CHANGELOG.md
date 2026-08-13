@@ -9,6 +9,11 @@
 
 ## [未发布]
 
+## [0.3.0-rc.1] - 2026-08-13
+
+首个 0.3.0 发布候选：新增原著分析、多集整稿断点接入与中文创作台，补齐输出语言、
+Look Development、生产观察校准和更严格的项目生命周期，同时修复 Windows 安装校验。
+
 ### 新增
 
 - **多集完整剧本按 Agent 判断切片并可断点续跑（修复 #27）**。`$short-drama-develop`
@@ -478,6 +483,7 @@ image-prompts / storyboard / video-prompts / review。
 fresh-agent 双臂盲测、独立 reviewer verdict 与 protected-release gate 三项未完成，
 由维护者知情后放行；相应记录以 `hold` 而非 `promotion` 留在仓库外的受控工作区。
 
-[未发布]: https://github.com/worldwonderer/drama-skills/compare/v0.2.0...HEAD
+[未发布]: https://github.com/worldwonderer/drama-skills/compare/v0.3.0-rc.1...HEAD
+[0.3.0-rc.1]: https://github.com/worldwonderer/drama-skills/compare/v0.2.0...v0.3.0-rc.1
 [0.2.0]: https://github.com/worldwonderer/drama-skills/releases/tag/v0.2.0
 [0.1.0]: https://github.com/worldwonderer/drama-skills/releases/tag/v0.1.0
