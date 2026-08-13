@@ -19,6 +19,7 @@ import re
 import shutil
 import stat
 import sys
+import unicodedata
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
@@ -109,6 +110,23 @@ EPISODE_ID_RE = re.compile(r"EP(?:[0-9]{3}|[1-9][0-9]{3,})")
 SCENE_ID_TOKEN_RE = re.compile(
     r"(?<![A-Z0-9])SC(?:[0-9]{3}|[1-9][0-9]{3,})(?![A-Z0-9])"
 )
+WINDOWS_FORBIDDEN_PATH_CHARACTERS = frozenset('<>:"|?*')
+WINDOWS_RESERVED_PATH_STEMS = frozenset(
+    {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{number}" for number in range(1, 10)),
+        *(f"lpt{number}" for number in range(1, 10)),
+        "com¹",
+        "com²",
+        "com³",
+        "lpt¹",
+        "lpt²",
+        "lpt³",
+    }
+)
 # Roots no stage may publish into, each with the reason a creator needs. Matched
 # case-insensitively: this suite is developed on case-insensitive filesystems,
 # where `Inputs/x.md` and `inputs/x.md` are the same file on disk, so a
@@ -156,10 +174,9 @@ DECLARED_PROJECT_ARTIFACT_OWNERS: dict[str, str] = {
     "development/lookdev-image-prompt-specs.jsonl": "short-drama-image-prompts",
     "development/lookdev-prompts.md": "short-drama-image-prompts",
     # Source analysis is a separate layer from the adaptation contract: analysis
-    # can be overturned, an accepted contract cannot. Only the fixed-name files
-    # are declared; per-chapter extractions carry generated names and stay
-    # owner-unconstrained like every other undeclared path.
+    # can be overturned, an accepted contract cannot.
     "development/source-analysis/_index.json": "short-drama-novel-analyze",
+    "development/source-analysis/_progress.md": "short-drama-novel-analyze",
     "development/source-analysis/triage.md": "short-drama-novel-analyze",
     "development/source-analysis/story-units.md": "short-drama-novel-analyze",
     "development/source-analysis/rhythm-and-emotion.md": "short-drama-novel-analyze",
@@ -180,6 +197,12 @@ DECLARED_PROJECT_ARTIFACT_OWNERS: dict[str, str] = {
     # reference recording bound in the character record; this file is the
     # derived text a voice director or a cloning operator reads.
     "bible/voice-casting.md": "short-drama-assets",
+}
+DECLARED_PROJECT_ARTIFACT_FAMILY_OWNERS: dict[str, str] = {
+    # Chapter filenames are generated, but the contract declares exactly one
+    # Markdown layer below this directory. Claim that bounded family without
+    # taking ownership of arbitrary nested or differently typed creator files.
+    "development/source-analysis/chapters": "short-drama-novel-analyze",
 }
 # Same, for the path below `episodes/<EP>/`.
 DECLARED_EPISODE_ARTIFACT_OWNERS: dict[str, str] = {
@@ -742,12 +765,18 @@ def _project_status_from_root(
     raw_artifacts = state.get("artifacts")
     artifacts: dict[str, Any] = raw_artifacts if isinstance(raw_artifacts, dict) else {}
     transaction_counts: dict[str, int] = {}
+    blocked = state.get("blocked_transactions")
+    blocked_ids = set(blocked) if isinstance(blocked, dict) else set()
     transactions = root / ".short-drama/transactions"
     if transactions.is_dir():
         for transaction in transactions.iterdir():
             if not transaction.is_dir():
                 continue
-            status = _transaction_status(transaction)
+            status = (
+                "blocked"
+                if transaction.name in blocked_ids
+                else _transaction_status(transaction)
+            )
             transaction_counts[status] = transaction_counts.get(status, 0) + 1
     return _build_project_status(
         project=project,
@@ -791,6 +820,8 @@ def project_status_at(
     raw_artifacts = state.get("artifacts")
     artifacts: dict[str, Any] = raw_artifacts if isinstance(raw_artifacts, dict) else {}
     transaction_counts: dict[str, int] = {}
+    blocked = state.get("blocked_transactions")
+    blocked_ids = set(blocked) if isinstance(blocked, dict) else set()
     try:
         transactions_fd = _open_directory_at(
             directory_fd, (".short-drama", "transactions")
@@ -824,7 +855,11 @@ def project_status_at(
                     )
                     continue
                 try:
-                    status = _transaction_status_at(transaction_fd)
+                    status = (
+                        "blocked"
+                        if entry.name in blocked_ids
+                        else _transaction_status_at(transaction_fd)
+                    )
                 finally:
                     os.close(transaction_fd)
                 transaction_counts[status] = transaction_counts.get(status, 0) + 1
@@ -842,15 +877,185 @@ def project_status_at(
     )
 
 
+def _has_nonportable_path_component(parts: tuple[str, ...]) -> bool:
+    for part in parts:
+        stem = part.split(".", 1)[0].casefold()
+        if (
+            part.endswith((" ", "."))
+            or any(ord(character) < 32 or ord(character) == 127 for character in part)
+            or any(character in WINDOWS_FORBIDDEN_PATH_CHARACTERS for character in part)
+            or stem in WINDOWS_RESERVED_PATH_STEMS
+        ):
+            return True
+    return False
+
+
 def _relative_path(value: str | Path, *, allow_operations: bool = False) -> str:
     raw = str(value).replace("\\", "/")
     pure = PurePosixPath(raw)
-    if not raw or pure.is_absolute() or any(part in ("", ".", "..") for part in pure.parts):
+    if (
+        not raw
+        or pure.is_absolute()
+        or any(part in ("", ".", "..") for part in pure.parts)
+        or _has_nonportable_path_component(pure.parts)
+    ):
         raise ValueError(f"unsafe project-relative path: {value!s}")
     relative = pure.as_posix()
     if not allow_operations and pure.parts[0].casefold() == ".short-drama":
         raise ValueError("operational state cannot be a publication target")
     return relative
+
+
+def _portable_path_identity(value: str) -> str:
+    """Return the path identity shared by supported case/Unicode-folding volumes."""
+
+    return unicodedata.normalize("NFC", value.casefold())
+
+
+def _register_portable_path(
+    seen: dict[str, str],
+    relative: str,
+    *,
+    label: str,
+    allow_exact_duplicate: bool = False,
+) -> None:
+    """Reject spellings that collapse on case-insensitive supported filesystems."""
+
+    identity = _portable_path_identity(relative)
+    previous = seen.get(identity)
+    if previous is not None:
+        if allow_exact_duplicate and previous == relative:
+            return
+        raise ValueError(
+            f"{label} paths are not portable aliases: {previous} and {relative}"
+        )
+    seen[identity] = relative
+
+
+def _validate_existing_path_spelling(root: Path, relative: str, *, label: str) -> None:
+    """Require every existing component to use its on-disk spelling exactly."""
+
+    current = root
+    prefix: list[str] = []
+    parts = PurePosixPath(relative).parts
+    for index, part in enumerate(parts):
+        try:
+            entries = list(os.scandir(current))
+        except (FileNotFoundError, NotADirectoryError):
+            return
+        part_identity = _portable_path_identity(part)
+        matches = [
+            entry
+            for entry in entries
+            if _portable_path_identity(entry.name) == part_identity
+        ]
+        aliases = sorted(entry.name for entry in matches if entry.name != part)
+        if aliases:
+            existing = PurePosixPath(*prefix, aliases[0]).as_posix()
+            raise ValueError(
+                f"{label} path spelling aliases an existing path: "
+                f"{relative} conflicts with {existing}"
+            )
+        exact = next((entry for entry in matches if entry.name == part), None)
+        if exact is None or index == len(parts) - 1:
+            return
+        if not exact.is_dir(follow_symlinks=False):
+            return
+        prefix.append(part)
+        current /= part
+
+
+def _validate_new_path_set(
+    root: Path,
+    relatives: Iterable[str],
+    *,
+    label: str,
+    allow_exact_duplicate: bool = False,
+) -> None:
+    seen: dict[str, str] = {}
+    for relative in relatives:
+        _register_portable_path(
+            seen,
+            relative,
+            label=label,
+            allow_exact_duplicate=allow_exact_duplicate,
+        )
+        _validate_existing_path_spelling(root, relative, label=label)
+
+
+def _validate_paths_against_tracked_state(
+    state: Mapping[str, Any], relatives: Iterable[str]
+) -> None:
+    tracked: dict[str, str] = {}
+    artifacts = state.get("artifacts", {})
+    if not isinstance(artifacts, dict):
+        raise ValueError("state.artifacts must be an object")
+    path_keys = (
+        "candidate_targets",
+        "accepted_targets",
+        "candidate_inputs",
+        "accepted_inputs",
+        "candidate_input_records",
+        "accepted_input_records",
+    )
+    for record in artifacts.values():
+        if not isinstance(record, dict):
+            continue
+        for key in path_keys:
+            values = record.get(key)
+            if not isinstance(values, dict):
+                continue
+            for raw in values:
+                if not isinstance(raw, str):
+                    raise ValueError(f"tracked {key} path is invalid")
+                relative = _relative_path(
+                    raw,
+                    allow_operations=key
+                    in {
+                        "candidate_inputs",
+                        "accepted_inputs",
+                        "candidate_input_records",
+                        "accepted_input_records",
+                    },
+                )
+                _register_portable_path(
+                    tracked,
+                    relative,
+                    label="tracked project",
+                    allow_exact_duplicate=True,
+                )
+    for relative in relatives:
+        previous = tracked.get(_portable_path_identity(relative))
+        if previous is not None and previous != relative:
+            raise ValueError(
+                "new path spelling aliases a tracked project path: "
+                f"{relative} conflicts with {previous}"
+            )
+
+
+def _normalize_portable_path_values(
+    root: Path,
+    values: Iterable[str | Path],
+    *,
+    label: str,
+    allow_operations: bool = False,
+) -> list[str]:
+    normalized: list[str] = []
+    seen: dict[str, str] = {}
+    exact: set[str] = set()
+    for value in values:
+        relative = _relative_path(value, allow_operations=allow_operations)
+        _register_portable_path(
+            seen,
+            relative,
+            label=label,
+            allow_exact_duplicate=True,
+        )
+        _validate_existing_path_spelling(root, relative, label=label)
+        if relative not in exact:
+            exact.add(relative)
+            normalized.append(relative)
+    return sorted(normalized)
 
 
 def _root_role(name: str) -> str | None:
@@ -866,7 +1071,7 @@ def is_protected_project_text(value: str | Path) -> bool:
     pure = PurePosixPath(raw)
     if not raw or pure.is_absolute() or any(
         part in ("", ".", "..") for part in pure.parts
-    ):
+    ) or _has_nonportable_path_component(pure.parts):
         return True
     return (
         pure.name.casefold() == PROJECT_FILE
@@ -1098,7 +1303,14 @@ def _expected_path_owner(relative: str) -> str | None:
     if role is None:
         return None
     normalized = PurePosixPath(role, *folded_parts[1:]).as_posix()
-    return DECLARED_PROJECT_ARTIFACT_OWNERS.get(normalized)
+    exact = DECLARED_PROJECT_ARTIFACT_OWNERS.get(normalized)
+    if exact is not None:
+        return exact
+    normalized_parts = PurePosixPath(normalized).parts
+    if len(normalized_parts) == 4 and normalized_parts[-1].endswith(".md"):
+        family = PurePosixPath(*normalized_parts[:3]).as_posix()
+        return DECLARED_PROJECT_ARTIFACT_FAMILY_OWNERS.get(family)
+    return None
 
 
 def _project_path(root: Path, relative: str) -> Path:
@@ -1193,10 +1405,26 @@ def _normalize_read_set(
     if isinstance(read_set, Mapping):
         items = ((str(path), expected) for path, expected in read_set.items())
     else:
-        items = ((str(path), _live_hash(_project_path(root, _relative_path(path, allow_operations=True)))) for path in read_set)
-    records = dict(read_records or {})
+        items = ((str(path), None) for path in read_set)
+    normalized_items: list[tuple[str, str | None]] = []
+    seen: dict[str, str] = {}
     for raw, expected in items:
         relative = _relative_path(raw, allow_operations=True)
+        _register_portable_path(seen, relative, label="read set")
+        _validate_existing_path_spelling(root, relative, label="read set")
+        normalized_items.append((relative, expected))
+    records: dict[str, Mapping[str, str]] = {}
+    record_paths: dict[str, str] = {}
+    for raw, bindings in (read_records or {}).items():
+        relative = _relative_path(raw, allow_operations=True)
+        _register_portable_path(
+            record_paths, relative, label="read record binding"
+        )
+        _validate_existing_path_spelling(root, relative, label="read record binding")
+        records[relative] = bindings
+    for relative, expected in normalized_items:
+        if not isinstance(read_set, Mapping):
+            expected = _live_hash(_project_path(root, relative))
         if expected is not None and not re.fullmatch(r"[0-9a-f]{64}", expected):
             raise ValueError(f"invalid expected read hash for {relative}")
         actual = _live_hash(_project_path(root, relative))
@@ -1392,6 +1620,27 @@ def _block_transaction(
         _append_wal(wal, {"event": "BLOCKED", "code": code})
 
 
+def _block_untrusted_transaction(root: Path, transaction_id: str, *, code: str) -> None:
+    """Persist a blocker without trusting fields from an invalid manifest."""
+
+    state = _read_state(root)
+    blocked = state.setdefault("blocked_transactions", {})
+    if not isinstance(blocked, dict):
+        blocked = {}
+        state["blocked_transactions"] = blocked
+    value = {
+        "code": code,
+        "artifact_ids": [],
+        "resolution": ["recover_with_previous_version", "manual_migration"],
+    }
+    if blocked.get(transaction_id) == value:
+        return
+    blocked[transaction_id] = value
+    state["updated_at"] = utc_now()
+    state["last_action"] = "transaction_blocked"
+    atomic_json(root / STATE_FILE, state)
+
+
 def _quarantine_manifestless_transaction(root: Path, transaction_id: str) -> Path:
     transaction = root / ".short-drama/transactions" / transaction_id
     quarantine = (
@@ -1483,7 +1732,13 @@ def publish_transaction(
             raise ValueError("artifact id cannot be empty")
         apply_lifecycle_changes({}, changes)
         validated_changes[str(artifact_id)] = dict(changes)
-    relative_outputs = {_relative_path(key): value for key, value in outputs.items()}
+    normalized_output_items = [(_relative_path(key), value) for key, value in outputs.items()]
+    _validate_new_path_set(
+        root,
+        (relative for relative, _ in normalized_output_items),
+        label="publication output",
+    )
+    relative_outputs = dict(normalized_output_items)
     # `_delivery_gate` is an internal argument, not a stage name: `stage` is
     # creator-supplied, so gating on stage == "delivery" would let any caller
     # unlock the packaged tree by naming itself after it. It skips the layout
@@ -1499,10 +1754,16 @@ def publish_transaction(
         default_artifact = next(iter(validated_changes)) if len(validated_changes) == 1 else stage
         mapped_artifacts = {relative: default_artifact for relative in relative_outputs}
     else:
-        mapped_artifacts = {
-            _relative_path(relative): str(artifact)
+        normalized_artifact_items = [
+            (_relative_path(relative), str(artifact))
             for relative, artifact in target_artifacts.items()
-        }
+        ]
+        _validate_new_path_set(
+            root,
+            (relative for relative, _ in normalized_artifact_items),
+            label="target artifact",
+        )
+        mapped_artifacts = dict(normalized_artifact_items)
         missing = sorted(set(relative_outputs) - set(mapped_artifacts))
         extra = sorted(set(mapped_artifacts) - set(relative_outputs))
         if missing or extra:
@@ -1514,7 +1775,21 @@ def publish_transaction(
         # Layout selection is project-wide state. Validate it while holding the
         # same lock that covers target replacement and state application so two
         # first publications cannot commit opposite directory families.
+        state = _read_state(root)
+        _validate_new_path_set(root, relative_outputs, label="publication output")
         layout_family = _validate_project_output_layout(root, relative_outputs)
+        read_entries = _normalize_read_set(root, read_set, read_records)
+        transaction_paths = [
+            *relative_outputs,
+            *(entry["path"] for entry in read_entries),
+        ]
+        _validate_new_path_set(
+            root,
+            transaction_paths,
+            label="transaction",
+            allow_exact_duplicate=True,
+        )
+        _validate_paths_against_tracked_state(state, transaction_paths)
         transaction_id = uuid.uuid4().hex
         transaction = root / ".short-drama/transactions" / transaction_id
         staged = transaction / "staged"
@@ -1522,7 +1797,6 @@ def publish_transaction(
         if transaction.stat().st_dev != root.stat().st_dev:
             raise TransactionError("transaction directory is not on the project filesystem")
 
-        read_entries = _normalize_read_set(root, read_set, read_records)
         targets: list[dict[str, Any]] = []
         for index, relative in enumerate(sorted(relative_outputs)):
             content_value = relative_outputs[relative]
@@ -1690,6 +1964,7 @@ def _validate_manifest(manifest: dict[str, Any], txid: str) -> None:
     if not isinstance(read_set, list):
         raise TransactionError("transaction read set is invalid")
     read_paths: set[str] = set()
+    portable_read_paths: dict[str, str] = {}
     for entry in read_set:
         if not isinstance(entry, dict) or not {"path", "expected_hash"} <= set(entry):
             raise TransactionError("transaction read set entry is invalid")
@@ -1710,6 +1985,9 @@ def _validate_manifest(manifest: dict[str, Any], txid: str) -> None:
         relative = _relative_path(
             entry["path"], allow_operations=authority == "accepted"
         )
+        _register_portable_path(
+            portable_read_paths, relative, label="transaction read set"
+        )
         if relative in read_paths:
             raise TransactionError("transaction read set paths are duplicated")
         read_paths.add(relative)
@@ -1723,6 +2001,8 @@ def _validate_manifest(manifest: dict[str, Any], txid: str) -> None:
             raise TransactionError("candidate read set hash must be exact")
     indices: set[int] = set()
     paths: set[str] = set()
+    portable_target_paths: dict[str, str] = {}
+    portable_snapshot_paths: dict[str, str] = {}
     for target in manifest["targets"]:
         required = {
             "index",
@@ -1740,6 +2020,9 @@ def _validate_manifest(manifest: dict[str, Any], txid: str) -> None:
         if not isinstance(target["index"], int) or target["index"] < 0:
             raise TransactionError("transaction target index is invalid")
         relative = _relative_path(target["path"])
+        _register_portable_path(
+            portable_target_paths, relative, label="transaction target"
+        )
         if target["index"] in indices or relative in paths:
             raise TransactionError("transaction target records are duplicated")
         indices.add(target["index"])
@@ -1755,6 +2038,12 @@ def _validate_manifest(manifest: dict[str, Any], txid: str) -> None:
             if not isinstance(pointer, str):
                 raise TransactionError(f"invalid {key} in transaction manifest")
             snapshot = PurePosixPath(_relative_path(pointer, allow_operations=True))
+            _register_portable_path(
+                portable_snapshot_paths,
+                snapshot.as_posix(),
+                label="transaction snapshot",
+                allow_exact_duplicate=True,
+            )
             if snapshot.parts[:2] != (".short-drama", "accepted-snapshots"):
                 raise TransactionError(f"invalid {key} zone in transaction manifest")
     if indices != set(range(len(manifest["targets"]))):
@@ -1849,8 +2138,38 @@ def recover_transaction(
                 "already_recovered": False,
                 "code": "MANIFEST_MISSING",
             }
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        _validate_manifest(manifest, transaction_id)
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            _block_untrusted_transaction(root, transaction_id, code="MANIFEST_INVALID")
+            return {
+                "transaction_id": transaction_id,
+                "status": "blocked",
+                "direction": "forward" if _has_commit(transaction) else "rollback",
+                "already_recovered": False,
+                "code": "MANIFEST_INVALID",
+            }
+        try:
+            _validate_manifest(manifest, transaction_id)
+        except (TransactionError, ValueError, TypeError, KeyError) as error:
+            # 0.3.0 rejects path spellings that Win32 aliases to another file.
+            # A transaction prepared by an older release may still contain one;
+            # never replay such an unauthenticated manifest under relaxed rules,
+            # but persist a stable blocker instead of raising forever on recover.
+            code = (
+                "NONPORTABLE_LEGACY_PATH"
+                if "unsafe project-relative path" in str(error)
+                or "portable aliases" in str(error)
+                else "MANIFEST_INVALID"
+            )
+            _block_untrusted_transaction(root, transaction_id, code=code)
+            return {
+                "transaction_id": transaction_id,
+                "status": "blocked",
+                "direction": "forward" if _has_commit(transaction) else "rollback",
+                "already_recovered": False,
+                "code": code,
+            }
         try:
             events = _read_wal(transaction / "wal.jsonl", tolerate_missing=True)
         except (OSError, UnicodeError, TransactionError):
@@ -2105,12 +2424,29 @@ def _structured_candidate_refs(
 
     references: list[tuple[str, str, str | None]] = []
 
-    def collect(value: Any) -> None:
+    def collect(value: Any, context: str | None = None) -> None:
         if isinstance(value, dict):
             owner = value.get("owner")
             artifact = value.get("artifact")
             digest = value.get("hash")
-            if isinstance(owner, str) and isinstance(artifact, str) and "hash" in value:
+            context_is_ref = (
+                isinstance(context, str)
+                and context.casefold().endswith(("_ref", "_refs"))
+                and not context.casefold().endswith(("_locator", "_locators"))
+            )
+            context_is_locator = isinstance(context, str) and context.casefold().endswith(
+                ("_locator", "_locators")
+            )
+            has_artifact_ref_field = any(
+                field in value for field in ("owner", "artifact", "hash")
+            )
+            complete_ref_shape = all(
+                field in value for field in ("owner", "artifact", "hash")
+            )
+            ref_like = not context_is_locator and (
+                (context_is_ref and has_artifact_ref_field) or complete_ref_shape
+            )
+            if ref_like:
                 # A ref carrying an unfilled placeholder used to be skipped
                 # here, so a candidate published straight from a template
                 # contributed no dependency edges at all and the exact-input
@@ -2118,11 +2454,15 @@ def _structured_candidate_refs(
                 # cleaner the publish looked. _normalize_artifact_ref already
                 # rejects the same shape for lifecycle evidence refs.
                 #
-                # Keyed on the presence of `hash`, not on its being a string:
-                # gating on isinstance would leave `"hash": null` and
-                # `"hash": 123` as the same silent drop under a new spelling.
-                # `*_locator` objects carry no `hash` key at all, so they stay
-                # untouched.
+                # A `*_ref` / `*_refs` context carrying any ArtifactRef field
+                # fails closed; a complete owner/artifact/hash object remains a
+                # ref even at the document root or in a neutral container.
+                # An arbitrary metadata `hash` alone is not a dependency, and
+                # `*_locator` objects stay explicitly excluded.
+                if not isinstance(owner, str) or not owner:
+                    raise ValueError("structured ref owner is missing or invalid")
+                if not isinstance(artifact, str) or not artifact:
+                    raise ValueError("structured ref artifact is missing or invalid")
                 if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
                     raise ValueError(f"structured ref hash is unfilled or invalid: {artifact}")
                 authority = value.get("authority")
@@ -2131,11 +2471,11 @@ def _structured_candidate_refs(
                         f"structured ref authority is invalid: {_relative_path(artifact)}"
                     )
                 references.append((_relative_path(artifact), digest, authority))
-            for child in value.values():
-                collect(child)
+            for key, child in value.items():
+                collect(child, key)
         elif isinstance(value, list):
             for child in value:
-                collect(child)
+                collect(child, context)
 
     for document in documents:
         collect(document)
@@ -2144,8 +2484,10 @@ def _structured_candidate_refs(
 
 def _normalize_hash_mapping(values: Mapping[str, str], *, label: str) -> dict[str, str]:
     normalized: dict[str, str] = {}
+    seen: dict[str, str] = {}
     for raw, value in values.items():
         relative = _relative_path(raw)
+        _register_portable_path(seen, relative, label=label)
         if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
             raise ValueError(f"invalid {label} hash for {relative}")
         if relative in normalized:
@@ -2282,8 +2624,10 @@ def _normalize_record_selectors(
     values: Mapping[str, Iterable[str]] | None,
 ) -> dict[str, list[str]]:
     normalized: dict[str, list[str]] = {}
+    seen: dict[str, str] = {}
     for raw, selectors in (values or {}).items():
         relative = _relative_path(raw)
+        _register_portable_path(seen, relative, label="record binding")
         if relative in normalized:
             raise ValueError(f"duplicate record binding path: {relative}")
         unique: list[str] = []
@@ -2306,8 +2650,10 @@ def _input_record_bindings(record: Mapping[str, Any], key: str) -> dict[str, dic
     if not isinstance(raw, dict):
         raise ValueError(f"artifact {key} are invalid")
     normalized: dict[str, dict[str, str]] = {}
+    seen: dict[str, str] = {}
     for path, bindings in raw.items():
         relative = _relative_path(path)
+        _register_portable_path(seen, relative, label=f"artifact {key}")
         if not isinstance(bindings, dict) or not bindings:
             raise ValueError(f"artifact {key} entry is invalid: {relative}")
         if relative in normalized:
@@ -2348,8 +2694,10 @@ def _input_bindings(record: Mapping[str, Any], key: str) -> dict[str, str]:
     if not isinstance(raw, dict):
         raise ValueError(f"artifact {key} are unavailable")
     normalized: dict[str, str] = {}
+    seen: dict[str, str] = {}
     for path, expected in raw.items():
         relative = _relative_path(path)
+        _register_portable_path(seen, relative, label=f"artifact {key}")
         if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
             raise ValueError(f"artifact {key} hash is invalid: {relative}")
         if relative in normalized:
@@ -2810,6 +3158,7 @@ def _normalize_artifact_ref(
     if not isinstance(artifact, str):
         raise ValueError("evidence ref artifact is invalid")
     relative = _relative_path(artifact)
+    _validate_existing_path_spelling(root, relative, label="evidence ref")
     if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
         raise ValueError("evidence ref hash is invalid")
     if _live_hash(_project_path(root, relative)) != digest:
@@ -2927,14 +3276,17 @@ def publish_candidate(
     if not isinstance(artifact_id, str) or not artifact_id:
         raise ValueError("artifact id cannot be empty")
     normalized_outputs: dict[str, bytes] = {}
+    output_paths: dict[str, str] = {}
     for raw, value in outputs.items():
         relative = _relative_path(raw)
+        _register_portable_path(output_paths, relative, label="candidate output")
         # Layout before content: a target that will be refused anyway should
         # say so, rather than first reporting that a file the creator never
         # meant to put there is not valid JSON.
         _validate_publication_layout(
             relative, owner=owner, allow_unregistered=allow_unregistered_path
         )
+        _validate_existing_path_spelling(root, relative, label="candidate output")
         content = value.encode("utf-8") if isinstance(value, str) else bytes(value)
         _validate_candidate_content(relative, content)
         normalized_outputs[relative] = content
@@ -2946,8 +3298,11 @@ def publish_candidate(
     if isinstance(existing, dict) and existing.get("owner") not in (None, owner):
         raise ValueError("artifact owner cannot change during candidate publication")
     exact_inputs: dict[str, str] = {}
+    input_paths: dict[str, str] = {}
     for raw, expected in (input_hashes or {}).items():
         relative = _relative_path(raw)
+        _register_portable_path(input_paths, relative, label="input")
+        _validate_existing_path_spelling(root, relative, label="input")
         if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
             raise ValueError(f"invalid input hash for {relative}")
         if relative in exact_inputs:
@@ -2955,6 +3310,7 @@ def publish_candidate(
         exact_inputs[relative] = expected
     exact_inputs = dict(sorted(exact_inputs.items()))
     selectors = _normalize_record_selectors(input_records)
+    _validate_new_path_set(root, selectors, label="record binding")
     unbound = sorted(set(selectors) - set(exact_inputs))
     if unbound:
         raise ValueError(
@@ -2978,55 +3334,95 @@ def publish_candidate(
         relative: sha256_bytes(content)
         for relative, content in normalized_outputs.items()
     }
+    structured_refs: list[tuple[str, str, str | None]] = []
     for output, content in normalized_outputs.items():
-        for referenced_path, referenced_hash, reference_authority in _structured_candidate_refs(
-            output, content
-        ):
-            if referenced_path in candidate_hashes:
-                if reference_authority != "candidate":
-                    raise ValueError(
-                        "same-publication ref must declare candidate authority: "
-                        f"{referenced_path}"
-                    )
-                if candidate_hashes[referenced_path] != referenced_hash:
-                    raise ValueError(
-                        "same-publication ref hash does not match candidate output: "
-                        f"{referenced_path}"
-                    )
-                continue
-            if reference_authority == "candidate":
-                accepted_provider = any(
-                    isinstance(record, dict)
-                    and isinstance(record.get("accepted_targets"), dict)
-                    and record["accepted_targets"].get(referenced_path)
-                    == referenced_hash
-                    for record in artifacts.values()
-                )
-                candidate_provider = any(
-                    isinstance(record, dict)
-                    and isinstance(record.get("candidate_targets"), dict)
-                    and record["candidate_targets"].get(referenced_path)
-                    == referenced_hash
-                    for record in artifacts.values()
-                )
-                if accepted_provider:
-                    raise ValueError(
-                        "accepted input cannot declare candidate authority: "
-                        f"{referenced_path}"
-                    )
-                if not candidate_provider:
-                    raise ValueError(
-                        "candidate input has no matching candidate provider: "
-                        f"{referenced_path}"
-                    )
-            if referenced_path not in exact_inputs:
+        structured_refs.extend(_structured_candidate_refs(output, content))
+    ref_paths: dict[str, tuple[str, str, str | None]] = {}
+    for referenced_path, referenced_hash, reference_authority in structured_refs:
+        identity = _portable_path_identity(referenced_path)
+        previous = ref_paths.get(identity)
+        if previous is not None:
+            if previous != (
+                referenced_path,
+                referenced_hash,
+                reference_authority,
+            ):
                 raise ValueError(
-                    f"structured ref requires exact input: {referenced_path}"
+                    "structured refs conflict or use nonportable path aliases: "
+                    f"{previous[0]} and {referenced_path}"
                 )
-            if exact_inputs[referenced_path] != referenced_hash:
+        else:
+            ref_paths[identity] = (
+                referenced_path,
+                referenced_hash,
+                reference_authority,
+            )
+        _validate_existing_path_spelling(root, referenced_path, label="structured ref")
+    _validate_paths_against_tracked_state(
+        state,
+        [*candidate_hashes, *exact_inputs, *(ref[0] for ref in ref_paths.values())],
+    )
+    candidate_identities = {
+        _portable_path_identity(path): path for path in candidate_hashes
+    }
+    input_identities = {_portable_path_identity(path): path for path in exact_inputs}
+    for referenced_path, referenced_hash, reference_authority in ref_paths.values():
+        reference_identity = _portable_path_identity(referenced_path)
+        candidate_spelling = candidate_identities.get(reference_identity)
+        if candidate_spelling is not None and candidate_spelling != referenced_path:
+            raise ValueError(
+                "structured ref aliases a same-publication output: "
+                f"{referenced_path} conflicts with {candidate_spelling}"
+            )
+        input_spelling = input_identities.get(reference_identity)
+        if input_spelling is not None and input_spelling != referenced_path:
+            raise ValueError(
+                "structured ref aliases an exact input: "
+                f"{referenced_path} conflicts with {input_spelling}"
+            )
+        if referenced_path in candidate_hashes:
+            if reference_authority != "candidate":
                 raise ValueError(
-                    f"structured ref input hash does not match: {referenced_path}"
+                    "same-publication ref must declare candidate authority: "
+                    f"{referenced_path}"
                 )
+            if candidate_hashes[referenced_path] != referenced_hash:
+                raise ValueError(
+                    "same-publication ref hash does not match candidate output: "
+                    f"{referenced_path}"
+                )
+            continue
+        if reference_authority == "candidate":
+            accepted_provider = any(
+                isinstance(record, dict)
+                and isinstance(record.get("accepted_targets"), dict)
+                and record["accepted_targets"].get(referenced_path)
+                == referenced_hash
+                for record in artifacts.values()
+            )
+            candidate_provider = any(
+                isinstance(record, dict)
+                and isinstance(record.get("candidate_targets"), dict)
+                and record["candidate_targets"].get(referenced_path)
+                == referenced_hash
+                for record in artifacts.values()
+            )
+            if accepted_provider:
+                raise ValueError(
+                    "accepted input cannot declare candidate authority: "
+                    f"{referenced_path}"
+                )
+            if not candidate_provider:
+                raise ValueError(
+                    "candidate input has no matching candidate provider: "
+                    f"{referenced_path}"
+                )
+        if referenced_path not in exact_inputs:
+            raise ValueError(f"structured ref requires exact input: {referenced_path}")
+        if exact_inputs[referenced_path] != referenced_hash:
+            raise ValueError(
+                f"structured ref input hash does not match: {referenced_path}"
+            )
     lifecycle_changes = {
         artifact_id: {
             "build_state": "materialized",
@@ -3554,6 +3950,7 @@ def _normalize_text_exceptions(
     provenance_allowlist = {"creator_supplied", "story_world_authored"}
     text_policy_allowlist = {"visible_on_screen", "fictional_interface_text"}
     url_pattern = re.compile(r"https?://[^\s<>\"'\])}，。；]+", re.IGNORECASE)
+    path_spellings: dict[str, str] = {}
     # An exception releases either a complete URL or an exact on-screen string
     # whose machine paths are quoted in full. A declaration that is only a path
     # prefix (or that carries no complete path token) is rejected, so it cannot
@@ -3588,6 +3985,12 @@ def _normalize_text_exceptions(
         ):
             raise PackageBlockedError("invalid on-screen text delivery exception")
         relative = _relative_path(bound_path)
+        _register_portable_path(
+            path_spellings,
+            relative,
+            label="text exception",
+            allow_exact_duplicate=True,
+        )
         record = {
             "exact_text": exact,
             "path": relative,
@@ -3793,12 +4196,23 @@ def build_delivery_package(
     root = find_project(path)
     if EPISODE_ID_RE.fullmatch(episode) is None:
         raise ValueError("episode must use an EP001-style identifier")
-    exceptions, allowed_urls_by_path = _normalize_text_exceptions(text_exceptions)
+    try:
+        exceptions, allowed_urls_by_path = _normalize_text_exceptions(text_exceptions)
+    except ValueError as error:
+        raise PackageBlockedError(str(error)) from error
     state = _read_state(root)
     files: list[dict[str, Any]] = []
     outputs: dict[str, bytes] = {}
     source_artifacts: set[str] = set()
-    normalized_selected = sorted({_relative_path(selected) for selected in selected_paths})
+    try:
+        normalized_selected = _normalize_portable_path_values(
+            root, selected_paths, label="delivery selection"
+        )
+        _validate_paths_against_tracked_state(
+            state, [*normalized_selected, *allowed_urls_by_path]
+        )
+    except ValueError as error:
+        raise PackageBlockedError(str(error)) from error
     selected_episode_roots = {
         PurePosixPath(relative).parts[0]
         for relative in normalized_selected
@@ -3868,7 +4282,31 @@ def build_delivery_package(
         )
 
     coverage = _episode_coverage(state, episode)
-    declared_omissions = {_relative_path(value) for value in (omitted_paths or ())}
+    try:
+        declared_omissions = set(
+            _normalize_portable_path_values(
+                root, omitted_paths or (), label="delivery omission"
+            )
+        )
+        _validate_paths_against_tracked_state(state, declared_omissions)
+    except ValueError as error:
+        raise PackageBlockedError(str(error)) from error
+    selected_identities = {
+        _portable_path_identity(relative): relative for relative in selected
+    }
+    omission_identities = {
+        _portable_path_identity(relative): relative for relative in declared_omissions
+    }
+    alias_contradictions = sorted(
+        f"{selected_identities[identity]} / {omission_identities[identity]}"
+        for identity in set(selected_identities) & set(omission_identities)
+        if selected_identities[identity] != omission_identities[identity]
+    )
+    if alias_contradictions:
+        raise PackageBlockedError(
+            "path cannot be selected and omitted with different spelling: "
+            + ", ".join(alias_contradictions)
+        )
     unknown_omissions = sorted(declared_omissions - set(coverage))
     if unknown_omissions:
         raise PackageBlockedError(
@@ -3956,18 +4394,228 @@ def build_delivery_package(
     }
 
 
-def verify_delivery_package(path: Path, *, episode: str) -> dict[str, Any]:
-    """Re-read a delivered package and check it against its own checksums.
+def _delivery_root_for_verification(
+    layout: Mapping[str, Any], episode: str, package_exists: Callable[[str], bool]
+) -> str:
+    if layout["mode"] == "mixed":
+        available = [
+            name
+            for name in (
+                CANONICAL_ROOTS["delivery"],
+                LEGACY_ROOTS["delivery"],
+            )
+            if package_exists(name)
+        ]
+        if len(available) > 1:
+            raise PackageBlockedError(f"{episode} 同时存在中文与旧版英文交付包")
+        return available[0] if available else CANONICAL_ROOTS["delivery"]
+    # No cross-root fallback here: a package under the other family gives that
+    # root content, which puts its family in detected_modes and selects `mixed`.
+    return str(layout["roots"]["delivery"])
 
-    `package` writes `checksums.sha256` and nothing ever read it back, so a
-    delivered tree could be edited afterwards and still look delivered. This is
-    the missing half: it re-hashes every listed file, and reports extra files
-    too, because an unlisted addition is invisible to a checksum list.
-    """
+
+def _verify_delivery_contents(
+    *,
+    root: Path,
+    episode: str,
+    delivery_root: str,
+    state: Mapping[str, Any],
+    checksums_content: bytes,
+    live_hash: Callable[[str], str | None],
+    present_members: Callable[[], set[str]],
+) -> dict[str, Any]:
+    # Authenticate the list before trusting any path inside it. A modified
+    # unauthenticated list is reported as tampered without traversing its
+    # entries, preventing it from becoming a hash oracle for outside files.
+    checksums_relative = f"{delivery_root}/{episode}/checksums.sha256"
+    artifacts = state.get("artifacts")
+    recorded: str | None = None
+    if isinstance(artifacts, dict):
+        record = artifacts.get(f"delivery:{episode}")
+        accepted = record.get("accepted_targets") if isinstance(record, dict) else None
+        if isinstance(accepted, dict) and isinstance(
+            accepted.get(checksums_relative), str
+        ):
+            recorded = accepted[checksums_relative]
+    checksum_list_authentic = (
+        recorded is not None and recorded == sha256_bytes(checksums_content)
+    )
+    if not checksum_list_authentic:
+        return {
+            "project_root": str(root),
+            "episode": episode,
+            "file_count": 0,
+            "mismatched": [],
+            "missing": [],
+            "unlisted": [],
+            "checksum_list_authentic": False,
+            "status": "tampered",
+        }
+
+    expected: dict[str, str] = {}
+    expected_paths: dict[str, str] = {}
+    for number, line in enumerate(
+        checksums_content.decode("utf-8").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        digest, separator, relative = line.partition("  ")
+        if not separator or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise PackageBlockedError(f"checksum line {number} is malformed")
+        try:
+            normalized = _relative_path(relative)
+        except ValueError as error:
+            raise PackageBlockedError(
+                f"checksum line {number} has an unsafe path"
+            ) from error
+        if normalized != relative or normalized == "checksums.sha256":
+            raise PackageBlockedError(f"checksum line {number} has an unsafe path")
+        try:
+            _register_portable_path(
+                expected_paths, normalized, label="checksum entry"
+            )
+        except ValueError as error:
+            raise PackageBlockedError(
+                f"checksum line {number} repeats a portable path alias"
+            ) from error
+        if normalized in expected:
+            raise PackageBlockedError(f"checksum line {number} repeats {normalized}")
+        expected[normalized] = digest
+
+    mismatched: list[str] = []
+    missing: list[str] = []
+    for relative, digest in sorted(expected.items()):
+        actual = live_hash(relative)
+        if actual is None:
+            missing.append(relative)
+        elif actual != digest:
+            mismatched.append(relative)
+
+    unlisted = sorted(present_members() - set(expected) - {"checksums.sha256"})
+    intact = not (mismatched or missing or unlisted)
+    return {
+        "project_root": str(root),
+        "episode": episode,
+        "file_count": len(expected),
+        "mismatched": mismatched,
+        "missing": missing,
+        "unlisted": unlisted,
+        "checksum_list_authentic": True,
+        "status": "intact" if intact else "tampered",
+    }
+
+
+def _is_link_like(details: os.stat_result) -> bool:
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(details, "st_file_attributes", 0)
+    return stat.S_ISLNK(details.st_mode) or bool(attributes & reparse_flag)
+
+
+def _portable_regular_bytes(root: Path, relative: str | Path) -> bytes:
+    pure = PurePosixPath(relative)
+    current = root
+    for part in pure.parts[:-1]:
+        current = current / part
+        details = os.lstat(current)
+        if _is_link_like(details) or not stat.S_ISDIR(details.st_mode):
+            raise TransactionConflictError(f"unsafe directory component: {current}")
+    target = current / pure.name
+    details = os.lstat(target)
+    if _is_link_like(details) or not stat.S_ISREG(details.st_mode):
+        raise TransactionConflictError(f"unsafe regular file: {target}")
+    return target.read_bytes()
+
+
+def _portable_package_directory(root: Path, delivery_root: str, episode: str) -> Path:
+    current = root
+    for part in (delivery_root, episode):
+        current = current / part
+        details = os.lstat(current)
+        if _is_link_like(details) or not stat.S_ISDIR(details.st_mode):
+            raise TransactionConflictError(f"unsafe package directory: {current}")
+    return current
+
+
+def _portable_package_members(package: Path) -> set[str]:
+    present: set[str] = set()
+
+    def collect(parent: Path, parts: tuple[str, ...]) -> None:
+        try:
+            entries = list(os.scandir(parent))
+        except OSError:
+            if parts:
+                present.add(PurePosixPath(*parts).as_posix())
+            return
+        for entry in entries:
+            relative = PurePosixPath(*parts, entry.name).as_posix()
+            try:
+                details = entry.stat(follow_symlinks=False)
+            except OSError:
+                present.add(relative)
+                continue
+            if _is_link_like(details):
+                present.add(relative)
+            elif stat.S_ISDIR(details.st_mode):
+                collect(Path(entry.path), (*parts, entry.name))
+            else:
+                present.add(relative)
+
+    collect(package, ())
+    return present
+
+
+def _verify_delivery_package_portable(root: Path, episode: str) -> dict[str, Any]:
+    try:
+        state = json.loads(_portable_regular_bytes(root, STATE_FILE).decode("utf-8"))
+    except FileNotFoundError:
+        state = {}
+    layout = _project_layout_from_root(root)
+
+    def package_exists(name: str) -> bool:
+        try:
+            _portable_package_directory(root, name, episode)
+        except FileNotFoundError:
+            return False
+        except (OSError, TransactionConflictError) as error:
+            raise PackageBlockedError(
+                f"unsafe delivered package path for {episode}"
+            ) from error
+        return True
+
+    delivery_root = _delivery_root_for_verification(layout, episode, package_exists)
+    try:
+        package = _portable_package_directory(root, delivery_root, episode)
+        checksums_content = _portable_regular_bytes(package, "checksums.sha256")
+    except FileNotFoundError as error:
+        raise PackageBlockedError(f"no delivered package for {episode}") from error
+    except (OSError, TransactionConflictError) as error:
+        raise PackageBlockedError(f"no safe delivered package for {episode}") from error
+
+    def live_hash(relative: str) -> str | None:
+        try:
+            return sha256_bytes(_portable_regular_bytes(package, relative))
+        except (OSError, TransactionConflictError):
+            return None
+
+    return _verify_delivery_contents(
+        root=root,
+        episode=episode,
+        delivery_root=delivery_root,
+        state=state,
+        checksums_content=checksums_content,
+        live_hash=live_hash,
+        present_members=lambda: _portable_package_members(package),
+    )
+
+
+def verify_delivery_package(path: Path, *, episode: str) -> dict[str, Any]:
+    """Re-read a delivered package and check it against its own checksums."""
 
     root = find_project(path)
     if EPISODE_ID_RE.fullmatch(episode) is None:
         raise ValueError("episode must use an EP001-style identifier")
+    if os.name == "nt":
+        return _verify_delivery_package_portable(root, episode)
     flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
     try:
         root_fd = os.open(root, flags)
@@ -3993,26 +4641,9 @@ def verify_delivery_package(path: Path, *, episode: str) -> dict[str, Any]:
             os.close(descriptor)
             return True
 
-        if layout["mode"] == "mixed":
-            available = [
-                name
-                for name in (
-                    CANONICAL_ROOTS["delivery"],
-                    LEGACY_ROOTS["delivery"],
-                )
-                if package_exists(name)
-            ]
-            if len(available) > 1:
-                raise PackageBlockedError(f"{episode} 同时存在中文与旧版英文交付包")
-            delivery_root = (
-                available[0] if available else CANONICAL_ROOTS["delivery"]
-            )
-        else:
-            # No cross-root fallback here: a package under the other family
-            # gives that root content, which puts its family in detected_modes
-            # and makes the layout `mixed`, so control would have taken the
-            # branch above. Cross-root resolution is owned there.
-            delivery_root = str(layout["roots"]["delivery"])
+        delivery_root = _delivery_root_for_verification(
+            layout, episode, package_exists
+        )
         try:
             delivery_fd = _open_directory_at(root_fd, (delivery_root, episode))
             checksums_content = _read_regular_at(delivery_fd, "checksums.sha256")
@@ -4024,114 +4655,52 @@ def verify_delivery_package(path: Path, *, episode: str) -> dict[str, Any]:
         except (OSError, TransactionConflictError) as error:
             raise PackageBlockedError(f"no safe delivered package for {episode}") from error
 
-        # Authenticate the list before trusting any path inside it. A modified
-        # unauthenticated list is reported as tampered without traversing its
-        # entries, preventing it from becoming a hash oracle for outside files.
-        checksums_relative = f"{delivery_root}/{episode}/checksums.sha256"
-        artifacts = state.get("artifacts")
-        recorded: str | None = None
-        if isinstance(artifacts, dict):
-            record = artifacts.get(f"delivery:{episode}")
-            accepted = (
-                record.get("accepted_targets") if isinstance(record, dict) else None
-            )
-            if isinstance(accepted, dict) and isinstance(
-                accepted.get(checksums_relative), str
-            ):
-                recorded = accepted[checksums_relative]
-        checksum_list_authentic = (
-            recorded is not None and recorded == sha256_bytes(checksums_content)
-        )
-        if not checksum_list_authentic:
-            return {
-                "project_root": str(root),
-                "episode": episode,
-                "file_count": 0,
-                "mismatched": [],
-                "missing": [],
-                "unlisted": [],
-                "checksum_list_authentic": False,
-                "status": "tampered",
-            }
-
-        expected: dict[str, str] = {}
-        for number, line in enumerate(
-            checksums_content.decode("utf-8").splitlines(), start=1
-        ):
-            if not line.strip():
-                continue
-            digest, separator, relative = line.partition("  ")
-            if not separator or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-                raise PackageBlockedError(f"checksum line {number} is malformed")
+        def live_hash(relative: str) -> str | None:
             try:
-                normalized = _relative_path(relative)
-            except ValueError as error:
-                raise PackageBlockedError(
-                    f"checksum line {number} has an unsafe path"
-                ) from error
-            if normalized != relative or normalized == "checksums.sha256":
-                raise PackageBlockedError(
-                    f"checksum line {number} has an unsafe path"
-                )
-            if normalized in expected:
-                raise PackageBlockedError(
-                    f"checksum line {number} repeats {normalized}"
-                )
-            expected[normalized] = digest
-
-        mismatched: list[str] = []
-        missing: list[str] = []
-        for relative, digest in sorted(expected.items()):
-            try:
-                actual = _live_hash_at(delivery_fd, relative)
+                return _live_hash_at(delivery_fd, relative)
             except (OSError, TransactionConflictError):
-                actual = None
-            if actual is None:
-                missing.append(relative)
-            elif actual != digest:
-                mismatched.append(relative)
+                return None
 
-        present: set[str] = set()
+        def present_members() -> set[str]:
+            present: set[str] = set()
 
-        def collect(parent_fd: int, parts: tuple[str, ...]) -> None:
-            with os.scandir(parent_fd) as iterator:
-                entries = list(iterator)
-            for entry in entries:
-                relative = PurePosixPath(*parts, entry.name).as_posix()
-                if entry.is_symlink():
-                    present.add(relative)
-                    continue
-                if entry.is_dir(follow_symlinks=False):
-                    try:
-                        child_fd = os.open(
-                            entry.name,
-                            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                            dir_fd=parent_fd,
-                        )
-                    except OSError:
+            def collect(parent_fd: int, parts: tuple[str, ...]) -> None:
+                with os.scandir(parent_fd) as iterator:
+                    entries = list(iterator)
+                for entry in entries:
+                    relative = PurePosixPath(*parts, entry.name).as_posix()
+                    if entry.is_symlink():
                         present.add(relative)
                         continue
-                    try:
-                        collect(child_fd, (*parts, entry.name))
-                    finally:
-                        os.close(child_fd)
-                else:
-                    present.add(relative)
+                    if entry.is_dir(follow_symlinks=False):
+                        try:
+                            child_fd = os.open(
+                                entry.name,
+                                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=parent_fd,
+                            )
+                        except OSError:
+                            present.add(relative)
+                            continue
+                        try:
+                            collect(child_fd, (*parts, entry.name))
+                        finally:
+                            os.close(child_fd)
+                    else:
+                        present.add(relative)
 
-        collect(delivery_fd, ())
-        unlisted = sorted(present - set(expected) - {"checksums.sha256"})
+            collect(delivery_fd, ())
+            return present
 
-        intact = not (mismatched or missing or unlisted)
-        return {
-            "project_root": str(root),
-            "episode": episode,
-            "file_count": len(expected),
-            "mismatched": mismatched,
-            "missing": missing,
-            "unlisted": unlisted,
-            "checksum_list_authentic": True,
-            "status": "intact" if intact else "tampered",
-        }
+        return _verify_delivery_contents(
+            root=root,
+            episode=episode,
+            delivery_root=delivery_root,
+            state=state,
+            checksums_content=checksums_content,
+            live_hash=live_hash,
+            present_members=present_members,
+        )
     finally:
         if delivery_fd >= 0:
             os.close(delivery_fd)
@@ -4158,7 +4727,7 @@ def _publish_from_cli(args: argparse.Namespace) -> dict[str, Any]:
     for raw_target, raw_source in bindings.items():
         target = _relative_path(raw_target)
         source = _relative_path(raw_source)
-        if target == source:
+        if _portable_path_identity(target) == _portable_path_identity(source):
             raise ValueError("candidate source and publication target must differ")
         source_path = _project_path(root, source)
         if source_path.is_symlink() or not source_path.is_file():

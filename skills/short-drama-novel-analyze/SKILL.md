@@ -58,7 +58,13 @@ license: MIT
 
 ```bash
 python3 {技能目录}/scripts/novel_index.py index 输入/{原文文件} \
-  --out 项目开发/source-analysis/_index.json
+  --out 项目开发/source-analysis/_work/_index.next.json
+python3 {技能目录}/scripts/novel_index.py verify \
+  项目开发/source-analysis/_work/_index.next.json 输入/{原文文件}
+python3 {core 技能目录}/scripts/project_tool.py publish {项目根} \
+  --owner short-drama-novel-analyze --artifact-id source-analysis:index \
+  --output 项目开发/source-analysis/_index.json=项目开发/source-analysis/_work/_index.next.json \
+  --input 输入/{原文文件}=<索引中的 source.sha256>
 ```
 
 脚本识别阿拉伯数字与中文数字章号（含 千 / 两，覆盖千章以上连载），**只认一种编号单位**
@@ -75,7 +81,8 @@ python3 {技能目录}/scripts/novel_index.py index 输入/{原文文件} \
 需要与创作者确认后手写边界。
 
 原文本身没有章节标题时索引会返回空表，此时与创作者确认按什么切分，把边界写进
-`_index.json` 再继续——手写的行也要带齐 `sequence` / `line_start` / `line_end` /
+`_work/_index.next.json`，通过 `verify` 后再按上面的公开生命周期发布——手写的行也要带齐
+`sequence` / `line_start` / `line_end` /
 `content_sha256`，`verify` 会逐行检查并报出缺字段的行。
 
 原文换了一个字节，`verify` 就会报出来；改了原文必须重建索引，不能沿用旧 span。
@@ -105,6 +112,11 @@ python3 {技能目录}/scripts/novel_index.py sample \
 对照的第一版假设。
 
 停靠时把 `_progress.md` 的状态写成 `paused_after_triage`，断点写「下一步：S2 逐章提取」。
+
+S1–S5 的 Agent 创作产物同样先写到 `source-analysis/_work/`，完成本阶段机械检查后，再由
+core `project_tool.py publish` 以本技能 owner 和稳定 artifact-id 发布到上表中的正式路径；
+不要从脚本、编辑器或 shell 直接覆盖 `_index.json`、`_progress.md`、`chapters/*.md` 或聚合
+产物。`_work/` 是候选工作区，不是权威分析层，也不进入交付包。
 
 ### S2 逐章功能提取
 

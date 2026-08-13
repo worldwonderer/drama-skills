@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -643,6 +644,60 @@ class PublicLifecycleCliTests(unittest.TestCase):
                     outputs={"episodes/EP001/storyboard/shots.jsonl": content},
                 )
 
+    def test_publish_rejects_incomplete_structured_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            complete = {
+                "owner": "short-drama-write",
+                "artifact": "episodes/EP001/screenplay.md",
+                "hash": "a" * 64,
+            }
+            cases = {
+                "owner": "structured ref owner is missing",
+                "artifact": "structured ref artifact is missing",
+                "hash": "structured ref hash is unfilled",
+            }
+            for missing, message in cases.items():
+                with self.subTest(missing=missing):
+                    reference = {key: value for key, value in complete.items() if key != missing}
+                    content = json.dumps({"source_ref": reference}) + "\n"
+                    with self.assertRaisesRegex(ValueError, message):
+                        project_tool.publish_candidate(
+                            root,
+                            artifact_id=f"EP001:missing-{missing}",
+                            owner="short-drama-storyboard",
+                            outputs={"episodes/EP001/storyboard/shots.jsonl": content},
+                        )
+
+    def test_publish_does_not_treat_locators_as_artifact_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            content = (
+                json.dumps(
+                    {
+                        "source_locator": {
+                            "artifact": "episodes/EP001/screenplay.md",
+                            "line_start": 1,
+                            "line_end": 2,
+                        },
+                        "affected_binding_locators": [
+                            {
+                                "artifact": "bible/characters.jsonl",
+                                "record_id": "CHAR-1",
+                            }
+                        ],
+                    }
+                )
+                + "\n"
+            )
+            result = project_tool.publish_candidate(
+                root,
+                artifact_id="EP001:locators",
+                owner="short-drama-storyboard",
+                outputs={"episodes/EP001/storyboard/locators.jsonl": content},
+            )
+            self.assertEqual(result["status"], "committed")
+
     def test_publish_rejects_verbatim_shipped_shot_template(self) -> None:
         template = (
             SUITE / "skills/short-drama-storyboard/assets/shot-template.jsonl"
@@ -825,6 +880,231 @@ class PublicLifecycleCliTests(unittest.TestCase):
                 owner="short-drama-storyboard",
                 outputs={"episodes/EP001/scratch.json": '{"a":1}\n'},
             )
+
+    def test_publish_enforces_source_analysis_file_family_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            outputs = {
+                "development/source-analysis/_progress.md": "# progress\n",
+                "development/source-analysis/chapters/ch-1-extract.md": "# chapter\n",
+            }
+            for path in outputs:
+                with self.subTest(path=path):
+                    with self.assertRaisesRegex(
+                        ValueError, f"short-drama-novel-analyze owns {re.escape(path)}"
+                    ):
+                        project_tool.publish_candidate(
+                            root,
+                            artifact_id=f"wrong-owner:{Path(path).name}",
+                            owner="short-drama-write",
+                            outputs={path: outputs[path]},
+                        )
+                    self.assertFalse((root / path).exists())
+
+            project_tool.publish_candidate(
+                root,
+                artifact_id="source-analysis:batch-1",
+                owner="short-drama-novel-analyze",
+                outputs=outputs,
+            )
+            for path, content in outputs.items():
+                with self.subTest(published=path):
+                    self.assertEqual((root / path).read_text(encoding="utf-8"), content)
+
+    def test_project_paths_reject_cross_platform_aliases(self) -> None:
+        invalid = (
+            "episodes/EP001/storyboard /shots.jsonl",
+            "episodes/EP001/storyboard./shots.jsonl",
+            "episodes/EP001/CON.json",
+            "episodes/EP001/notes\nextra.md",
+            "episodes/EP001/a:b.json",
+        )
+        for path in invalid:
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "unsafe project-relative path"):
+                    project_tool._relative_path(path)
+                self.assertTrue(project_tool.is_protected_project_text(path))
+
+        self.assertEqual(
+            project_tool._relative_path("剧集/EP001/分镜/第 1 镜.json"),
+            "剧集/EP001/分镜/第 1 镜.json",
+        )
+
+    def test_project_path_sets_reject_casefold_aliases_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            state_before = (root / ".short-drama/state.json").read_bytes()
+            transactions = root / ".short-drama/transactions"
+
+            with self.assertRaisesRegex(ValueError, "aliases"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="casefold:pair",
+                    owner="short-drama-write",
+                    outputs={
+                        "episodes/EP001/Notes.md": "A\n",
+                        "episodes/EP001/notes.md": "B\n",
+                    },
+                )
+
+            self.assertFalse((root / "episodes/EP001/Notes.md").exists())
+            self.assertFalse((root / "episodes/EP001/notes.md").exists())
+            self.assertEqual(
+                [path for path in transactions.iterdir() if path.is_dir()], []
+            )
+            self.assertEqual((root / ".short-drama/state.json").read_bytes(), state_before)
+
+            project_tool.publish_candidate(
+                root,
+                artifact_id="casefold:tracked",
+                owner="short-drama-write",
+                outputs={"episodes/EP001/Notes.md": "first\n"},
+            )
+            tracked_state = (root / ".short-drama/state.json").read_bytes()
+            with self.assertRaisesRegex(ValueError, "aliases"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="casefold:tracked-alias",
+                    owner="short-drama-write",
+                    outputs={"episodes/EP001/notes.md": "second\n"},
+                )
+            self.assertEqual(
+                (root / "episodes/EP001/Notes.md").read_text(encoding="utf-8"),
+                "first\n",
+            )
+            self.assertEqual((root / ".short-drama/state.json").read_bytes(), tracked_state)
+
+    def test_project_path_sets_reject_unicode_normalization_aliases(self) -> None:
+        composed = "development/caf\N{LATIN SMALL LETTER E WITH ACUTE}.md"
+        decomposed = "development/cafe\N{COMBINING ACUTE ACCENT}.md"
+        self.assertEqual(
+            project_tool._portable_path_identity(composed),
+            project_tool._portable_path_identity(decomposed),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            state_before = (root / ".short-drama/state.json").read_bytes()
+            with self.assertRaisesRegex(ValueError, "portable aliases"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="unicode-alias:pair",
+                    owner="short-drama-develop",
+                    outputs={composed: "same\n", decomposed: "same\n"},
+                )
+            self.assertEqual((root / ".short-drama/state.json").read_bytes(), state_before)
+            self.assertEqual(
+                [
+                    path
+                    for path in (root / ".short-drama/transactions").iterdir()
+                    if path.is_dir()
+                ],
+                [],
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            existing = root / decomposed
+            existing.parent.mkdir(parents=True, exist_ok=True)
+            existing.write_text("existing\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "aliases an existing path"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="unicode-alias:disk",
+                    owner="short-drama-develop",
+                    outputs={composed: "replacement\n"},
+                )
+            self.assertEqual(existing.read_text(encoding="utf-8"), "existing\n")
+
+    def test_plain_metadata_hash_is_not_mistaken_for_an_artifact_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            path = "development/metadata.json"
+            project_tool.publish_candidate(
+                root,
+                artifact_id="metadata:hash",
+                owner="short-drama-develop",
+                outputs={path: json.dumps({"metadata": {"hash": "content-address"}})},
+            )
+            self.assertTrue((root / path).is_file())
+
+    def test_complete_artifact_refs_are_detected_outside_ref_named_keys(self) -> None:
+        complete_ref = {
+            "owner": "short-drama-write",
+            "artifact": "episodes/EP001/screenplay.md",
+            "hash": "a" * 64,
+        }
+        documents = (complete_ref, {"references": [complete_ref]})
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            for index, document in enumerate(documents):
+                with self.subTest(index=index), self.assertRaisesRegex(
+                    ValueError, "structured ref requires exact input"
+                ):
+                    project_tool.publish_candidate(
+                        root,
+                        artifact_id=f"root-ref:{index}",
+                        owner="short-drama-develop",
+                        outputs={
+                            f"development/root-ref-{index}.json": json.dumps(document)
+                        },
+                    )
+
+    def test_structured_ref_rejects_same_publication_case_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            target = "development/Notes.json"
+            content = b'{"value":1}\n'
+            reference = json.dumps(
+                {
+                    "source_ref": {
+                        "owner": "short-drama-develop",
+                        "artifact": "development/notes.json",
+                        "hash": hashlib.sha256(content).hexdigest(),
+                        "authority": "candidate",
+                    }
+                }
+            )
+            with self.assertRaisesRegex(ValueError, "aliases"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="casefold:structured-ref",
+                    owner="short-drama-develop",
+                    outputs={target: content, "development/ref.json": reference},
+                )
+
+    def test_read_sets_and_inputs_reject_casefold_aliases_before_prepare(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            source = root / "development/Data.md"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("source\n", encoding="utf-8")
+            source_hash = digest(source)
+            transactions = root / ".short-drama/transactions"
+
+            with self.assertRaisesRegex(ValueError, "aliases"):
+                project_tool.publish_transaction(
+                    root,
+                    stage="casefold-read",
+                    outputs={"development/data.md": "candidate\n"},
+                    lifecycle_changes={"casefold:read": {}},
+                    read_set={"development/Data.md": source_hash},
+                )
+            self.assertEqual(
+                [path for path in transactions.iterdir() if path.is_dir()], []
+            )
+            self.assertEqual(source.read_text(encoding="utf-8"), "source\n")
+
+            with self.assertRaisesRegex(ValueError, "aliases"):
+                project_tool.publish_candidate(
+                    root,
+                    artifact_id="casefold:inputs",
+                    owner="short-drama-develop",
+                    outputs={"development/output.md": "candidate\n"},
+                    input_hashes={
+                        "development/Data.md": source_hash,
+                        "development/data.md": source_hash,
+                    },
+                )
 
     def test_content_effect_artifacts_keep_their_declared_stage_owners(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

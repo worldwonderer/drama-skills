@@ -122,6 +122,140 @@ class RecoveryTests(unittest.TestCase):
                     wal_before,
                 )
 
+    def test_recovery_persists_a_block_for_legacy_nonportable_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            txid = self.publish_with_crash(root, "after_prepared")
+            transaction = root / ".short-drama/transactions" / txid
+            manifest_path = transaction / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["targets"][0]["path"] = "development/legacy:note.md"
+            project_tool.atomic_json(manifest_path, manifest)
+
+            result = project_tool.recover_transaction(root, txid)
+
+            self.assertEqual(result["status"], "blocked")
+            self.assertEqual(result["direction"], "rollback")
+            self.assertEqual(result["code"], "NONPORTABLE_LEGACY_PATH")
+            state = json.loads((root / ".short-drama/state.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                state["blocked_transactions"][txid]["code"],
+                "NONPORTABLE_LEGACY_PATH",
+            )
+            status = project_tool.project_status(root)
+            self.assertEqual(status["recovery"]["next_action"], "resolve_conflict")
+            self.assertEqual(status["recovery"]["transaction_counts"]["blocked"], 1)
+            self.assertNotIn(
+                "needs_rollback", status["recovery"]["transaction_counts"]
+            )
+
+    def test_nonportable_manifest_block_does_not_trust_later_records(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            txid = self.publish_with_crash(root, "after_prepared")
+            transaction = root / ".short-drama/transactions" / txid
+            manifest_path = transaction / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["read_set"] = [
+                {
+                    "path": "development/legacy:note.md",
+                    "expected_hash": "a" * 64,
+                }
+            ]
+            manifest["targets"] = [{}]
+            project_tool.atomic_json(manifest_path, manifest)
+            artifacts_before = json.loads(
+                (root / ".short-drama/state.json").read_text(encoding="utf-8")
+            )["artifacts"]
+
+            result = project_tool.recover_transaction(root, txid)
+
+            self.assertEqual(result["status"], "blocked")
+            self.assertEqual(result["code"], "NONPORTABLE_LEGACY_PATH")
+            state = json.loads((root / ".short-drama/state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["artifacts"], artifacts_before)
+            self.assertEqual(
+                state["blocked_transactions"][txid]["artifact_ids"], []
+            )
+
+    def test_recovery_blocks_casefold_aliases_in_legacy_manifests(self) -> None:
+        for field in ("targets", "read_set"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                root = self.make_project(directory)
+                txid = self.publish_with_crash(root, "after_prepared")
+                transaction = root / ".short-drama/transactions" / txid
+                manifest_path = transaction / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if field == "targets":
+                    duplicate = dict(manifest["targets"][0])
+                    duplicate["index"] = len(manifest["targets"])
+                    duplicate["path"] = duplicate["path"].swapcase()
+                    manifest["targets"].append(duplicate)
+                else:
+                    source = root / "development/Data.md"
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_text("input\n", encoding="utf-8")
+                    manifest["read_set"] = [
+                        {
+                            "path": "development/Data.md",
+                            "expected_hash": project_tool.sha256_file(source),
+                        },
+                        {
+                            "path": "development/data.md",
+                            "expected_hash": project_tool.sha256_file(source),
+                        },
+                    ]
+                project_tool.atomic_json(manifest_path, manifest)
+                before = {
+                    relative: (root / relative).read_bytes()
+                    for relative in (
+                        "episodes/EP001/screenplay.md",
+                        "episodes/EP001/beats.jsonl",
+                    )
+                }
+
+                result = project_tool.recover_transaction(root, txid)
+
+                self.assertEqual(result["status"], "blocked")
+                self.assertEqual(result["code"], "NONPORTABLE_LEGACY_PATH")
+                self.assertEqual(
+                    {
+                        relative: (root / relative).read_bytes()
+                        for relative in before
+                    },
+                    before,
+                )
+                recovery = project_tool.project_status(root)["recovery"]
+                self.assertEqual(recovery["next_action"], "resolve_conflict")
+                self.assertEqual(recovery["transaction_counts"], {"blocked": 1})
+
+    def test_recovery_blocks_unicode_aliases_in_legacy_manifests(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            txid = self.publish_with_crash(root, "after_prepared")
+            transaction = root / ".short-drama/transactions" / txid
+            manifest_path = transaction / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            composed = "development/caf\N{LATIN SMALL LETTER E WITH ACUTE}.md"
+            decomposed = "development/cafe\N{COMBINING ACUTE ACCENT}.md"
+            manifest["targets"][0]["path"] = composed
+            duplicate = dict(manifest["targets"][0])
+            duplicate["index"] = len(manifest["targets"])
+            duplicate["path"] = decomposed
+            manifest["targets"].append(duplicate)
+            project_tool.atomic_json(manifest_path, manifest)
+            before = (root / "episodes/EP001/screenplay.md").read_bytes()
+
+            result = project_tool.recover_transaction(root, txid)
+
+            self.assertEqual(result["status"], "blocked")
+            self.assertEqual(result["code"], "NONPORTABLE_LEGACY_PATH")
+            self.assertEqual(
+                (root / "episodes/EP001/screenplay.md").read_bytes(), before
+            )
+            recovery = project_tool.project_status(root)["recovery"]
+            self.assertEqual(recovery["next_action"], "resolve_conflict")
+
     def test_recovery_itself_resumes_at_each_mutation_boundary(self) -> None:
         scenarios = {
             "rollback": (
@@ -364,10 +498,9 @@ class RecoveryTests(unittest.TestCase):
                 },
                 before,
             )
-            self.assertEqual(
-                project_tool.project_status(root)["recovery"]["transaction_counts"],
-                {"corrupt": 1},
-            )
+            recovery = project_tool.project_status(root)["recovery"]
+            self.assertEqual(recovery["transaction_counts"], {"blocked": 1})
+            self.assertEqual(recovery["next_action"], "resolve_conflict")
 
     def test_manifestless_transaction_is_quarantined_and_marked_terminal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -661,6 +794,33 @@ class PackageTests(unittest.TestCase):
                 project_tool.project_status(root)["layout"]["mode"], "canonical"
             )
 
+    def test_portable_verify_backend_detects_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_approved_project(directory)
+            project_tool.build_delivery_package(
+                root,
+                episode="EP001",
+                selected_paths=[
+                    "episodes/EP001/screenplay.md",
+                    "episodes/EP001/assets/image-prompt-specs.jsonl",
+                ],
+            )
+            self.assertEqual(
+                project_tool._verify_delivery_package_portable(root, "EP001")[
+                    "status"
+                ],
+                "intact",
+            )
+            (root / "delivery/EP001/artifacts/episodes/EP001/screenplay.md").write_text(
+                "# 被改过\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                project_tool._verify_delivery_package_portable(root, "EP001")[
+                    "status"
+                ],
+                "tampered",
+            )
+
     def test_verify_rejects_duplicate_episode_across_delivery_roots(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = self.make_approved_project(directory)
@@ -760,6 +920,35 @@ class PackageTests(unittest.TestCase):
                 ),
             ):
                 project_tool.verify_delivery_package(root, episode="EP001")
+
+    def test_shared_verifier_rejects_casefold_checksum_aliases(self) -> None:
+        content = (
+            f"{'a' * 64}  artifacts/Notes.md\n"
+            f"{'b' * 64}  artifacts/notes.md\n"
+        ).encode("utf-8")
+        state = {
+            "artifacts": {
+                "delivery:EP001": {
+                    "accepted_targets": {
+                        "delivery/EP001/checksums.sha256": project_tool.sha256_bytes(
+                            content
+                        )
+                    }
+                }
+            }
+        }
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            project_tool.PackageBlockedError, "portable path alias"
+        ):
+            project_tool._verify_delivery_contents(
+                root=Path(directory),
+                episode="EP001",
+                delivery_root="delivery",
+                state=state,
+                checksums_content=content,
+                live_hash=lambda _relative: self.fail("alias must block before hashing"),
+                present_members=lambda: set(),
+            )
 
     def test_verify_detects_tampering_the_checksum_file_alone_cannot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -94,6 +95,20 @@ def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("x", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def _visible_width(text: str) -> int:
     """Count characters as a creator counts them, not as bytes."""
 
@@ -104,16 +119,17 @@ def find_heading_lines(lines: list[str]) -> tuple[list[dict[str, Any]], int]:
     headings: list[dict[str, Any]] = []
     long_lines = 0
     for offset, line in enumerate(lines):
-        match = CHAPTER_RE.match(line)
+        candidate = line.removeprefix("\ufeff") if offset == 0 else line
+        match = CHAPTER_RE.match(candidate)
         if match is None:
             continue
-        if _visible_width(line.strip()) > MAX_HEADING_LINE_WIDTH:
+        if _visible_width(candidate.strip()) > MAX_HEADING_LINE_WIDTH:
             long_lines += 1
             continue
         headings.append(
             {
                 "line_index": offset,
-                "raw": line.strip(),
+                "raw": candidate.strip(),
                 "number": chinese_to_int(match.group(1)),
                 "unit": match.group(2),
                 "title": match.group(3).strip(),
@@ -369,7 +385,10 @@ def verify_index(index_path: Path, source: Path) -> dict[str, Any]:
     index = json.loads(index_path.read_text(encoding="utf-8"))
     raw = source.read_bytes()
     problems: list[str] = []
-    if index.get("source", {}).get("sha256") != sha256_bytes(raw):
+    if not isinstance(index, dict):
+        return {"verified": False, "problems": ["index must be a JSON object"]}
+    source_record = index.get("source")
+    if not isinstance(source_record, dict) or source_record.get("sha256") != sha256_bytes(raw):
         return {
             "verified": False,
             "problems": [
@@ -382,6 +401,14 @@ def verify_index(index_path: Path, source: Path) -> dict[str, Any]:
     chapters = index.get("chapters", [])
     if not isinstance(chapters, list) or not chapters:
         return {"verified": False, "problems": ["index carries no chapters"]}
+    chapter_count = index.get("chapter_count")
+    if (
+        isinstance(chapter_count, bool)
+        or not isinstance(chapter_count, int)
+        or chapter_count != len(chapters)
+    ):
+        problems.append("chapter_count does not match the chapter rows")
+    previous_end: int | None = None
     for position, chapter in enumerate(chapters, start=1):
         if not isinstance(chapter, dict):
             problems.append(f"chapter row {position} is not an object")
@@ -393,7 +420,27 @@ def verify_index(index_path: Path, source: Path) -> dict[str, Any]:
                 "a hand-written span must carry the same fields the script writes"
             )
             continue
+        sequence = chapter["sequence"]
         start_line, end_line = chapter["line_start"], chapter["line_end"]
+        digest = chapter["content_sha256"]
+        if (
+            isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or sequence != position
+        ):
+            problems.append(
+                f"chapter row {position} sequence must be the contiguous value {position}"
+            )
+            continue
+        if any(
+            isinstance(value, bool) or not isinstance(value, int)
+            for value in (start_line, end_line)
+        ):
+            problems.append(f"chapter {sequence} line span must use integer line numbers")
+            continue
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            problems.append(f"chapter {sequence} content_sha256 must be a 64-character hex hash")
+            continue
         if not (1 <= start_line <= len(lines)) or not (
             start_line <= end_line <= len(lines)
         ):
@@ -402,12 +449,23 @@ def verify_index(index_path: Path, source: Path) -> dict[str, Any]:
                 f"{start_line}-{end_line}, outside the source's {len(lines)} lines"
             )
             continue
+        if previous_end is not None and start_line != previous_end + 1:
+            problems.append(
+                f"chapter {sequence} must start at line {previous_end + 1}; "
+                f"found {start_line}"
+            )
+            continue
+        previous_end = end_line
         start = line_offsets[start_line - 1]
         end = line_offsets[end_line] if end_line < len(line_offsets) else len(text)
-        if sha256_bytes(text[start:end].encode("utf-8")) != chapter["content_sha256"]:
+        if sha256_bytes(text[start:end].encode("utf-8")) != digest:
             problems.append(
                 f"chapter {chapter['sequence']} span no longer matches its hash"
             )
+    if previous_end is not None and previous_end != len(lines):
+        problems.append(
+            f"chapter spans end at line {previous_end}; source ends at line {len(lines)}"
+        )
     return {"verified": not problems, "problems": problems}
 
 
@@ -523,9 +581,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "index":
         document = build_index(args.source)
-        payload = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True)
+        payload = json.dumps(document, ensure_ascii=True, indent=2, sort_keys=True)
         if args.out is not None:
-            args.out.write_text(payload + "\n", encoding="utf-8")
+            _atomic_write_text(args.out, payload + "\n")
             print(
                 json.dumps(
                     {
@@ -535,7 +593,7 @@ def main(argv: list[str] | None = None) -> int:
                         "problems": document["problems"],
                         "out": str(args.out),
                     },
-                    ensure_ascii=False,
+                    ensure_ascii=True,
                     indent=2,
                 )
             )
@@ -545,16 +603,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "verify":
         result = verify_index(args.index, args.source)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=True, indent=2))
         return 0 if result["verified"] else 1
 
     if args.command == "sample":
         result = sample_chapters(args.index, args.count)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=True, indent=2))
         return 0 if result["sampled"] else 1
 
     result = coverage(args.index, args.analysis_dir, args.stage)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result["complete"] else 1
 
 

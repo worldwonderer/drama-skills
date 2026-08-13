@@ -1,4 +1,8 @@
 import importlib.util
+import math
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -242,6 +246,68 @@ class MotionTimingCheckTests(unittest.TestCase):
     def test_a_spec_without_a_motion_id_cannot_be_checked_at_all(self) -> None:
         with self.assertRaises(motion_timing_check.CheckError):
             self.check([{"timing_plan": {"mode": "explicit"}}])
+
+    def test_non_finite_boolean_and_negative_numbers_do_not_pass(self) -> None:
+        for value in (math.nan, math.inf, -math.inf, True, False, -1.0):
+            with self.subTest(value=value):
+                candidate = spec("M-1", "SHOT-1", [])
+                candidate["ordered_subject_motion"] = [
+                    {
+                        "timing": {
+                            "mode": "explicit",
+                            "value": {"start_seconds": value, "end_seconds": value},
+                        }
+                    }
+                ]
+                candidate["boundary_refs"] = {
+                    "duration": {"value_seconds": value}
+                }
+                result = motion_timing_check.check([candidate], [])
+                self.assertNotEqual(result["explicit_checked"], 1)
+                self.assertTrue(
+                    result["unmeasured_specs"] or result["findings"], result
+                )
+
+    def test_declared_total_must_be_finite_non_boolean_and_non_negative(self) -> None:
+        for value in (math.nan, math.inf, -math.inf, True, False, -1.0):
+            with self.subTest(value=value):
+                result = self.check(
+                    [
+                        spec(
+                            "M-1",
+                            "SHOT-1",
+                            ["0.0-4.0"],
+                            declared_total_or_endpoint_seconds=value,
+                        )
+                    ]
+                )
+                self.assertIn("VID_DECLARED_TOTAL_MISMATCH", codes(result))
+
+    def test_cli_rejects_non_finite_json_instead_of_emitting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            motions = root / "motion.jsonl"
+            shots = root / "shots.jsonl"
+            motions.write_text(
+                '{"motion_id":"M-1","timing_plan":{"mode":"explicit"},'
+                '"ordered_subject_motion":[{"timing":{"mode":"explicit",'
+                '"value":{"start_seconds":NaN,"end_seconds":Infinity}}}]}\n',
+                encoding="utf-8",
+            )
+            shots.write_text(
+                '{"shot_id":"SHOT-1","duration_seconds":4.0}\n', encoding="utf-8"
+            )
+
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPT), str(motions), "--shots", str(shots)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertEqual(completed.stdout, "")
+            self.assertIn("non-finite JSON number", completed.stderr)
 
 
 if __name__ == "__main__":

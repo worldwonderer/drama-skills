@@ -14,13 +14,13 @@
 - 批次没有通用固定值。Agent 先看索引里的各集 `byte_length`、实际复杂度和当前可用上下文，
   再为**本轮**明确选择 `--batch-size`；首轮宜保守，读过真实切片后可以调整。
 
-## 1. 只建一次候选索引
+## 1. 在工作区只建一次候选索引
 
 ```text
 python3 <本技能目录>/scripts/episode_intake.py index \
   输入/<完整剧本> \
   --source-ref 输入/<完整剧本> \
-  --out 项目开发/episode-intake-index.json
+  --out 项目开发/_work/episode-intake-index.next.json
 ```
 
 脚本识别短独立行形式的 `第N集`、`第N集 标题` 与 Markdown `# EP N`，统一写成规范
@@ -44,11 +44,26 @@ python3 <本技能目录>/scripts/episode_intake.py index \
 python3 <本技能目录>/scripts/episode_intake.py manual-index \
   输入/<完整剧本> <临时边界.jsonl> \
   --source-ref 输入/<完整剧本> \
-  --out 项目开发/episode-intake-index.json
+  --out 项目开发/_work/episode-intake-index.next.json
 ```
 
 `manual-index` 仍会机械阻断重号、跳号、倒序、空跨度和非规范 ID，但不会判断一幕是否应该
 属于上一集还是下一集；这个选择仍由 Agent 结合文件内容完成。
+
+自动或手工候选通过检查后，把它发布到正式 owner 路径；不要让 intake 工具直接覆盖规范索引：
+
+```text
+python3 <本技能目录>/scripts/episode_intake.py verify \
+  项目开发/_work/episode-intake-index.next.json 输入/<完整剧本>
+
+python3 <core 技能目录>/scripts/project_tool.py publish <项目根> \
+  --owner short-drama-develop --artifact-id series:episode-intake-index \
+  --output 项目开发/episode-intake-index.json=项目开发/_work/episode-intake-index.next.json \
+  --input 输入/<完整剧本>=<索引中的 source_sha256>
+```
+
+发布成功且下游命令已改读正式索引后再删除工作区候选。即使它只是可重建的机械索引，也必须
+通过 WAL 发布；“可重建”不等于可以绕过负责技能、prior snapshot 与失败恢复。
 
 ## 2. 每次只读当前集
 

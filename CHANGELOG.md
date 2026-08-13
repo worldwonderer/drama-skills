@@ -9,10 +9,12 @@
 
 ## [未发布]
 
-## [0.3.0-rc.1] - 2026-08-13
+## [0.3.0] - 2026-08-13
 
-首个 0.3.0 发布候选：新增原著分析、多集整稿断点接入与中文创作台，补齐输出语言、
-Look Development、生产观察校准和更严格的项目生命周期，同时修复 Windows 安装校验。
+v0.3.0 新增长篇原著分析、多集整稿断点接入与本地短剧创作台，补齐输出语言、
+Look Development、生产观察校准和更严格的项目生命周期，并修复 Windows 安装校验。
+正式版在发布候选基础上补齐原著索引失败路径、分析产物所有权、结构化引用完整性、
+VID-04 非法数值、跨平台路径唯一性、旧事务安全阻断及 Windows 交付验证。
 
 ### 新增
 
@@ -64,9 +66,55 @@ Look Development、生产观察校准和更严格的项目生命周期，同时�
   **记为新增**：默认行为与此前一致（中文项目仍出中文、提示词仍可沿用既有写法），
   创作者可覆盖任一字段。
 
+- **能力说明的第三种状态**：`production-prompt-grammar` 的「按已知能力调整写法」此前只有
+  支持/不支持两态，漏掉了中间那一段——仍在允许范围内、但需要反复重试才拿到可用结果的
+  不稳定区。它最容易被漏掉，因为它不报错：允许范围的上界回答「能不能提交」，稳定区的上界
+  才回答「提交一次大概率可用」，差额由重试补齐而代价由项目承担。现在它被写成**写作阶段的
+  决策点**（减少同镜并发主体、拆镜、把复合动作分到两镜），而不是提交后再观察的现象。判断
+  不依赖任何具体数字，只看创作者说明里是否出现「效果较好」「稳定性下降」这类措辞；说明只
+  给了允许范围时不自行推断一个更保守的数字当成事实。
+
+- **内容效果增强层**：Look Development 新增人物表现、核心地点、高压力场景三类可选风格帧；
+  storyboard 新增可选的场次视觉戏剧计划与 Coverage Audition；video-prompts 使用逐角色
+  `performance_arcs[]` 与 `attention_handoffs[]`，并投影场次声音策略。所有新增层都由创作者
+  接受后再向下游投影，不拥有剧本、资产或 shot 边界，也不规定宫格、方案数或镜头数。
+- **项目级生产反馈校准**：新增区分 `input_reference` / `generated_result` 的生产观察模板和
+  review 方法；结果观察绑定准确 prompt/spec、稳定参考槽位与制作配置，只在当前项目版本有效。
+  修订一次只改变诊断所需变量并记录 `preserve_set`，不从任务状态推断质量。
+- **维护者提示词学习轴**：`short-drama-knowhow` 增加题材承诺 × 制作/视觉语言 × 场景功能 ×
+  提示词职责 × 版本角色的定性阅读方法；继续禁止词频、匹配器、任务成功率或供应商字段生成创作规则。
+- **次级文本契约的配套模板**：`slot_id` / `order`、修订 lineage 与 readiness 三项规则本身按
+  约束力记在上方**变更**；这里只记它们的可复制载体——参考绑定模板补上两个字段，拆并镜
+  lineage 与准备度分别有独立 fragment 和派生写法，创作者不必自行发明结构。
+- **可选层减负**：Look Development 使用独立规格模板，不污染普通资产图片提示词；普通 shot 省略
+  空的场次计划/修订谱系，普通 motion 省略重复目的、场次计划、母版范围与 readiness 字段；Coverage
+  Audition 默认只留项目创作过程，打包时显式 `--omit`。表演/注意交接、补拍范围与拆并镜 lineage
+  都迁入按需 JSON fragment，既不污染普通记录，也不让 agent 临时发明字段。
+- **本地短剧创作台**：新增零生产依赖的 Python 本地服务和单页工作台，以内容目录和当前
+  正文浏览 `short-drama.json` 工程；支持 UTF-8 文本编辑、
+  SHA-256 乐观并发、
+  原子保存、Markdown/JSON/JSONL 安全预览、结构化数据双端校验、创作者可读生命周期卡片，
+  以及带预演/待审标签的图片和视频只读预览与视频 Range 请求。服务只绑定回环
+  地址，并拒绝异常 Host/Origin、符号链接、路径穿越和对项目清单、运行状态及交付包的写入。
+- **中文项目目录**：新项目使用 `输入/`、`项目开发/`、`设定集/`、`剧集/`、`交付/`、
+  `创作者决策/` 与 `审查/`。现有英文目录继续支持；第一次阶段发布把项目级布局
+  固定进运行状态，后续发布、打包与校验沿用同一布局。检测到中英文平行阶段树时，状态会
+  报告 `mixed` 并暂停新发布，已存在且集号唯一的交付包仍可校验。
+- **字幕与演示展示**：项目控制台支持编辑 SRT/ASS 字幕源文件；README 增加中文项目控制台
+  截图，并嵌入 15 秒原生音画中文字幕成片。
+- **`verify` 子命令**：用交付包自带的 `checksums.sha256` 复核它。此前该文件写出后
+  没有任何命令再读，交付目录被事后改动仍然"看起来已交付"。除逐个复核 hash 外，还报告
+  **未登记的新增文件**——校验和清单对新增是盲的。
+- **`motion_timing_check.py`**（video-prompts）：`VID-04` 此前是被声明为
+  `structural_invariant`、诊断码 `VID_EXPLICIT_TIMING_OVERFLOW` 也已分配、却没有任何
+  脚本读取 `motion-specs.jsonl` 的一条规则。新脚本做显式分段的算术核对。超出按**终点**
+  判断、不足按**裁剪到镜头长度内的并集**判断，因为中间留空加尾部超出会互相抵消：
+  `0.0-2.0` 加 `3.0-5.0` 在 4 秒镜头上"合计正好 4 秒"，实际却同时发生了截断与留白。
+  `relative` 计时不做算术断言，列在 `relative_plans` 中报告而不是判过。
+
 ### 变更
 
-- **Windows 安装不再把 CRLF 换行误判为套件混装**。清单生成器与运行时校验器现在都按
+- **Windows 安装不再把 CRLF 换行误判为套件混装（修复 #26）**。清单生成器与运行时校验器现在都按
   规范化后的 LF 文本计算 SHA-256；仅 CRLF/LF 不同的文件保持等价，真实内容变化仍会阻断。
   CI 新增真实 `windows-latest` 安装回归，覆盖此前 `/short-drama` 初始化在预检阶段被
   `short-drama-assets/SKILL.md` hash mismatch 阻断的问题。机器可读 CLI JSON 也改为 ASCII-safe
@@ -98,6 +146,16 @@ Look Development、生产观察校准和更严格的项目生命周期，同时�
   引用报 `structured ref hash is unfilled or invalid`。同一文件里给生命周期证据引用做
   校验的 `_normalize_artifact_ref` 早已是这个行为，本次只是把发布路径对齐。
   `*_locator` 对象不带 `hash` 键，不受影响。
+- **ArtifactRef-like 结构化引用必须完整声明 `owner`、`artifact` 与 `hash`**。已出现其中
+  任一依赖字段的 `*_ref` / `*_refs` 若缺其他字段，不再被静默当成普通对象跳过，避免下游
+  发布成功却没有依赖边。本地 `record_id` / `field` 引用及只负责定位的 `*_locator` /
+  `*_locators` 保持原行为；普通对象里的 `metadata.hash` 也不会被误判成跨产物依赖。
+- **项目路径在所有支持平台上保持唯一拼写**。发布、引用、打包与校验共用的路径入口现在
+  拒绝控制字符、Windows 保留设备名、非法字符以及以点或空格结尾的分量，避免同一路径在
+  Windows 上归一到另一负责技能的规范产物并绕过所有权检查；同一请求、已跟踪状态、结构化
+  引用及交付选择也会拒绝仅大小写不同、或 Unicode NFC/NFD 规范等价的路径别名，旧事务若含
+  此类别名会安全阻断而不重放。
+  该回归已加入 Windows CI。
 - **分集目录每个集号只有一种拼写**：`EP` 加三位数字，超过 `EP999` 之后不再补零
   （`EP001`、`EP1000`）。`episodes/ep1/`、`episodes/EP1/`、`episodes/EP0001/` 都会被
   拒绝。此前它们可以发布成功，随后被交付完整性闸门的 `episodes/<EP>/` 前缀枚举静默
@@ -188,56 +246,14 @@ Look Development、生产观察校准和更严格的项目生命周期，同时�
   替代版的记账只在选择了局部编辑或改写之后才建立。**记为变更**：既有校准 finding 在下次
   修订时补写处置即可，已接受产物不受影响。
 
-### 新增
-
-- **能力说明的第三种状态**：`production-prompt-grammar` 的「按已知能力调整写法」此前只有
-  支持/不支持两态，漏掉了中间那一段——仍在允许范围内、但需要反复重试才拿到可用结果的
-  不稳定区。它最容易被漏掉，因为它不报错：允许范围的上界回答「能不能提交」，稳定区的上界
-  才回答「提交一次大概率可用」，差额由重试补齐而代价由项目承担。现在它被写成**写作阶段的
-  决策点**（减少同镜并发主体、拆镜、把复合动作分到两镜），而不是提交后再观察的现象。判断
-  不依赖任何具体数字，只看创作者说明里是否出现「效果较好」「稳定性下降」这类措辞；说明只
-  给了允许范围时不自行推断一个更保守的数字当成事实。
-
-- **内容效果增强层**：Look Development 新增人物表现、核心地点、高压力场景三类可选风格帧；
-  storyboard 新增可选的场次视觉戏剧计划与 Coverage Audition；video-prompts 使用逐角色
-  `performance_arcs[]` 与 `attention_handoffs[]`，并投影场次声音策略。所有新增层都由创作者
-  接受后再向下游投影，不拥有剧本、资产或 shot 边界，也不规定宫格、方案数或镜头数。
-- **项目级生产反馈校准**：新增区分 `input_reference` / `generated_result` 的生产观察模板和
-  review 方法；结果观察绑定准确 prompt/spec、稳定参考槽位与制作配置，只在当前项目版本有效。
-  修订一次只改变诊断所需变量并记录 `preserve_set`，不从任务状态推断质量。
-- **维护者提示词学习轴**：`short-drama-knowhow` 增加题材承诺 × 制作/视觉语言 × 场景功能 ×
-  提示词职责 × 版本角色的定性阅读方法；继续禁止词频、匹配器、任务成功率或供应商字段生成创作规则。
-- **次级文本契约的配套模板**：`slot_id` / `order`、修订 lineage 与 readiness 三项规则本身按
-  约束力记在上方**变更**；这里只记它们的可复制载体——参考绑定模板补上两个字段，拆并镜
-  lineage 与准备度分别有独立 fragment 和派生写法，创作者不必自行发明结构。
-- **可选层减负**：Look Development 使用独立规格模板，不污染普通资产图片提示词；普通 shot 省略
-  空的场次计划/修订谱系，普通 motion 省略重复目的、场次计划、母版范围与 readiness 字段；Coverage
-  Audition 默认只留项目创作过程，打包时显式 `--omit`。表演/注意交接、补拍范围与拆并镜 lineage
-  都迁入按需 JSON fragment，既不污染普通记录，也不让 agent 临时发明字段。
-- **本地项目 Dashboard**：新增零生产依赖的 Python 本地服务和三栏项目工作台，按项目开发、
-  剧本、资产设定、分镜视频与审查交付浏览 `short-drama.json` 工程；支持 UTF-8 文本编辑、
-  SHA-256 乐观并发、
-  原子保存、Markdown/JSON/JSONL 安全预览、结构化数据双端校验、创作者可读生命周期卡片，
-  以及带预演/待审标签的图片和视频只读预览与视频 Range 请求。服务只绑定回环
-  地址，并拒绝异常 Host/Origin、符号链接、路径穿越和对项目清单、运行状态及交付包的写入。
-- **中文项目目录**：新项目使用 `输入/`、`项目开发/`、`设定集/`、`剧集/`、`交付/`、
-  `创作者决策/` 与 `审查/`。现有英文目录继续支持；第一次阶段发布把项目级布局
-  固定进运行状态，后续发布、打包与校验沿用同一布局。检测到中英文平行阶段树时，状态会
-  报告 `mixed` 并暂停新发布，已存在且集号唯一的交付包仍可校验。
-- **字幕与演示展示**：项目控制台支持编辑 SRT/ASS 字幕源文件；README 增加中文项目控制台
-  截图，并嵌入 15 秒原生音画中文字幕成片。
-- **`verify` 子命令**：用交付包自带的 `checksums.sha256` 复核它。此前该文件写出后
-  没有任何命令再读，交付目录被事后改动仍然"看起来已交付"。除逐个复核 hash 外，还报告
-  **未登记的新增文件**——校验和清单对新增是盲的。
-- **`motion_timing_check.py`**（video-prompts）：`VID-04` 此前是被声明为
-  `structural_invariant`、诊断码 `VID_EXPLICIT_TIMING_OVERFLOW` 也已分配、却没有任何
-  脚本读取 `motion-specs.jsonl` 的一条规则。新脚本做显式分段的算术核对。超出按**终点**
-  判断、不足按**裁剪到镜头长度内的并集**判断，因为中间留空加尾部超出会互相抵消：
-  `0.0-2.0` 加 `3.0-5.0` 在 4 秒镜头上"合计正好 4 秒"，实际却同时发生了截断与留白。
-  `relative` 计时不做算术断言，列在 `relative_plans` 中报告而不是判过。
-
 ### 修复
 
+- **多集接入索引不再绕过公开生命周期**。RC 文档让 `episode_intake.py` 直接覆盖 develop
+  拥有的正式索引，与同一阶段“只通过 publish 写入”的契约冲突。现在自动或 Agent 手工边界
+  先写 `_work/episode-intake-index.next.json`，验证后再经 WAL 发布到规范 owner 路径。
+- **原著分析产物所有权与声明对齐**。`_progress.md` 和 `chapters/*.md` 已由技能契约声明归
+  `$short-drama-novel-analyze`，但发布闸门此前只保护固定文件名，其他技能仍可覆盖这些
+  分析产物。现在以受限文件族强制负责人，同时不占用嵌套目录或其他类型的创作者文件。
 - **Lookdev 风格帧引用现在可从新建项目模板解析**：模板与参考资料一直要求
   `direction_ref.field` 绑定
   `/creator_authority/visual_direction/choices/look_development`，但新建项目的
@@ -264,6 +280,19 @@ Look Development、生产观察校准和更严格的项目生命周期，同时�
   处理入口。现与其他冲突一致：记为 blocked 并给出冲突现场。
 - **`verify` 重新区分「这一集从未打包」与「交付路径不安全」**：`FileNotFoundError`
   也是 `OSError`，两种情况此前塌缩成同一条敌意路径报错。
+- **Windows 现在也可执行交付包 `verify`**。安全目录文件描述符只在 POSIX 存在，旧实现却把
+  它用于公开生命周期命令，导致 Windows 在入口处失败。Windows 后端现在逐层拒绝链接与
+  reparse point，并复用同一套清单认证、hash 与未登记文件检查；真实 Windows CI 覆盖
+  package → verify。
+- **旧事务里的大小写路径别名不再进入恢复重放**。manifest 校验同时检查 read set、target
+  与 snapshot pointer 的可移植路径身份；旧版本留下的冲突拼写会持久标为
+  `NONPORTABLE_LEGACY_PATH`，保持创作者文件不变并进入 `resolve_conflict`。
+- **原著索引 CLI 与手写边界校验补齐失败路径**。`index --out` 会创建文档约定的
+  `source-analysis/_work/` 父目录并原子替换索引，UTF-8 BOM 不再隐藏第一章，机器 JSON 在旧代码页下安全输出；
+  `verify` 同时检查字段类型、连续 sequence、无重叠无缺口的行覆盖、chapter_count 与 hash，
+  非法手写边界会返回可读问题而不是 traceback 或错误通过。
+- **显式运动时序拒绝非有限值、布尔值与负数**。JSON 中的 `NaN` / `Infinity`、Python 布尔值
+  及负时长此前可让 VID-04 算术检查错误通过；现在统一产生阻断 finding。
 - **控制台的两处请求会话直接断开而不返回响应**：含非 ASCII 字节的会话凭证让
   `hmac.compare_digest` 抛 `TypeError`（认证前即可触发），顶层 JSON 不是对象的
   `short-drama.json` 让状态查询抛 `AttributeError`；两者都发生在处理器的 try 之外，
@@ -286,8 +315,21 @@ Look Development、生产观察校准和更严格的项目生命周期，同时�
 
 ### 升级既有项目
 
-新规则只在**新路径产生时**生效，已经写进预写日志的路径不受影响，所以升级不会让
-未完成的事务卡住：`recover` 照常回滚或前滚。
+升级前先用当前旧版本完成一次 `recover`，不要带着未完成事务升级。0.3.0 不会用放宽规则
+重放带非便携路径的旧事务，因为无法证明外部项目中的旧 manifest 可信；这类事务会持久标为
+`NONPORTABLE_LEGACY_PATH` 并进入 `resolve_conflict`，需用旧版本恢复或人工迁移，不会反复崩溃。
+
+0.3.0 新发布的路径不得包含控制字符、Windows 保留设备名、`< > : " | ? *`，分量也不得以
+点或空格结尾，也不得与另一已跟踪路径只在大小写或 Unicode 规范化形式上不同。既有 POSIX
+项目若用了这些拼写，或同时存在 `Notes.md` / `notes.md`、NFC / NFD 等价文件，先合并并
+重命名为唯一拼写，再重新 publish /
+accept / review / package。RC 期间若由错误 owner 发布过 `_progress.md` 或 `chapters/*.md`，由
+`$short-drama-novel-analyze` 重新发布并刷新下游 hash。
+
+旧产物里的跨产物引用若已经使用 `*_ref` / `*_refs`，重新发布前补齐 canonical
+ArtifactRef 的 `owner`、`artifact` 与 `hash`。若它原本只是同文件内的记录 ID，改用
+`*_id` / `*_ids`；若它只定位尚未发布的未来产物，改用不带 hash 的 `*_locator` /
+`*_locators`。完成修订后重新 publish / accept，并刷新所有下游输入 hash。
 
 若项目里已有 `episodes/ep1/` 这类旧目录，其中的产物仍可 `accept`，但不能再发布新版本，
 也不能打包交付。迁移方式是把内容按 `episodes/EP001/` 重新发布一次并重新接受。交付枚举
@@ -303,29 +345,25 @@ Look Development、生产观察校准和更严格的项目生命周期，同时�
 
 ### 已知缺口
 
-- 声明为 `structural_invariant` 的规则共 24 条，其中能在脚本里追溯到规则编号的是
-  `SHT-16`、`SHT-17`、`VID-15` 与本次新增的 `VID-04`，共 4 条。其余多数需要语义判断
-  （例如 `VID-08` 的“本镜准确主体/动作/接触/结果”），把它们改判为 `reviewed_invariant`
-  是契约层的取舍，应由维护者按逐条证据决定，不在本次一并改。新加的 `IMG-12` 与
+- 声明为 `structural_invariant` 的规则共 31 条，其中能在脚本里按规则编号追溯到自动校验器的是
+  `SHT-16`、`SHT-17`、`VID-15` 与本次新增的 `VID-04`，共 4 条。其余规则是否已有部分机械
+  覆盖、是否需要新增 validator 尚未逐条审计，不把“脚本未登记”误写成“只能语义判断”。
+  新加的 `IMG-12` 与
   `VID-17` 暂列为 `reviewed_invariant`：本轮不为这一项新增匹配脚本，审查者按准确槽位与顺序
   给证据；将来只有真实项目校验器接管后才提升为结构阻断。
 - `设定集/*.jsonl` 仍没有记录级 schema：发布检查只检查后缀、UTF-8 与可解析性，
-  `{"a":1}` 与空文件都能发布进去。五个校验脚本也都没有接进 `publish` 闸门，
+  `{"a":1}` 与空文件都能发布进去。现有阶段校验脚本也都没有接进 `publish` 闸门，
   只在智能体按提示词执行时才运行。
-- 结构化引用的守卫只收紧了 `hash`：`owner` 或 `artifact` 缺失时该引用仍被静默丢弃，
-  依赖边照样为零。这一条与 0.2.0 行为相同，不是本次引入的回归；收紧它同样属于
-  `structural_invariant` 收紧，需要单独记为变更。
-- `_relative_path` 不限制路径字符集：分量里含换行会让 `checksums.sha256` 一条产物写出
-  两行；Windows 语义下结尾的点或空格（`storyboard /shots.jsonl`）与规范拼写指向同一个
-  文件，却绕开负责人表。两者都需要给路径分量定一个字符集，属于跨命令的收紧。
 - `verify` 的 `checksum_list_authentic` 用的是同一棵树内的第二个锚点
   （`.short-drama/state.json` 里记录的 hash）。把产物、校验和清单与状态文件一起改仍能
   得到 `intact`；要防这一类需要把 hash 留在项目之外，属于交付流程而非本工具的范围。
-- `verify` 的 `os.walk` 没有 `onerror`：不可读的子目录会被静默跳过，其中的文件不进
-  `unlisted`。该行为在本次新增的枚举与此前的 `rglob` 写法下相同。
-- `_project_path` 只校验解析后的父目录仍在项目内，不校验中途是否经过符号链接目录，
-  因此可发布根目录下的符号链接仍能把写入重定向进 `inputs/` 或 `.short-drama/`。
-  该行为在 0.2.0 已存在。
+
+## [0.3.0-rc.1] - 2026-08-13
+
+0.3.0 的首个公开发布候选。正式版在候选版之后补齐原著索引失败路径、分析产物所有权、
+结构化引用完整性、VID-04 非法数值、跨平台路径唯一性、旧事务安全阻断及 Windows 交付
+验证；没有新增创作功能或改变 Agent 主导的语义判断边界。预发布标签与 GitHub Release
+继续保留，供升级验证记录追溯。
 
 ## [0.2.0] - 2026-07-27
 
@@ -483,7 +521,8 @@ image-prompts / storyboard / video-prompts / review。
 fresh-agent 双臂盲测、独立 reviewer verdict 与 protected-release gate 三项未完成，
 由维护者知情后放行；相应记录以 `hold` 而非 `promotion` 留在仓库外的受控工作区。
 
-[未发布]: https://github.com/worldwonderer/drama-skills/compare/v0.3.0-rc.1...HEAD
+[未发布]: https://github.com/worldwonderer/drama-skills/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/worldwonderer/drama-skills/compare/v0.2.0...v0.3.0
 [0.3.0-rc.1]: https://github.com/worldwonderer/drama-skills/compare/v0.2.0...v0.3.0-rc.1
 [0.2.0]: https://github.com/worldwonderer/drama-skills/releases/tag/v0.2.0
 [0.1.0]: https://github.com/worldwonderer/drama-skills/releases/tag/v0.1.0

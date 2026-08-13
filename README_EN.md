@@ -24,8 +24,8 @@ generations of in-house and open-source tooling. Front end and back end together
 reached nearly 80,000 lines, and stopped being maintainable at the pace models and
 requirements were moving.
 
-The answer turned out to be dropping the GUI entirely — distilling the historical
-project workspaces and image/video prompts into this skill suite, and letting
+The answer turned out to be dropping the monolithic all-in-one GUI — distilling
+the historical project workspaces and image/video prompts into this skill suite, and letting
 producers maintain projects and write prompts directly through an agent CLI over
 plain files, confirming the prompts before anything goes to generation. It works
 noticeably better. What is left of the in-house tooling is the generation queue.

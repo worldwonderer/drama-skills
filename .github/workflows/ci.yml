@@ -47,6 +47,10 @@ jobs:
           python -B -m unittest
           tests.test_installation_resolution
           tests.test_episode_intake
+          tests.test_public_lifecycle_cli.PublicLifecycleCliTests.test_project_paths_reject_cross_platform_aliases
+          tests.test_public_lifecycle_cli.PublicLifecycleCliTests.test_project_path_sets_reject_casefold_aliases_atomically
+          tests.test_public_lifecycle_cli.PublicLifecycleCliTests.test_project_path_sets_reject_unicode_normalization_aliases
+          tests.test_recovery_and_package.PackageTests.test_chinese_layout_packages_and_verifies_under_canonical_delivery
           -v
       - name: Verify checked-out suite
         run: python tools/verify_suite.py skills/short-drama

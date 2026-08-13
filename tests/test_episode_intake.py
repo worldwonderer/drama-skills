@@ -397,6 +397,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("Agent 判断这份文件实际怎样分集", workflow)
         self.assertIn("批次没有通用固定值", workflow)
         self.assertIn("不生成转折、回报、钩子等创作字段", workflow)
+        self.assertIn("项目开发/_work/episode-intake-index.next.json", workflow)
+        self.assertIn("project_tool.py publish", workflow)
+        self.assertIn("--owner short-drama-develop", workflow)
+        self.assertNotIn("--out 项目开发/episode-intake-index.json", workflow)
 
     def test_episode_intake_index_and_map_belong_to_develop(self) -> None:
         for relative in (

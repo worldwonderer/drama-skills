@@ -1,7 +1,11 @@
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from typing import Any
 
@@ -106,6 +110,14 @@ class ChapterIndexTests(unittest.TestCase):
         index = build_from(prose() + "\n")
         self.assertEqual(index["chapter_count"], 0)
         self.assertTrue(index["problems"])
+
+    def test_utf8_bom_does_not_hide_the_first_chapter(self) -> None:
+        index = build_from("\ufeff" + chapters(["一", "二", "三"]) + "\n")
+        self.assertEqual(
+            [chapter["source_number"] for chapter in index["chapters"]], [1, 2, 3]
+        )
+        self.assertEqual(index["chapters"][0]["line_start"], 1)
+        self.assertEqual(index["problems"], [])
 
 
 class NumberingValidationScopeTests(unittest.TestCase):
@@ -232,6 +244,43 @@ class VerifyTests(unittest.TestCase):
                 any("outside the source" in problem for problem in result["problems"]),
                 result["problems"],
             )
+
+    def test_manual_index_rejects_malformed_or_non_covering_rows(self) -> None:
+        text = chapters(["一", "二"]) + "\n"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "book.txt"
+            source.write_text(text, encoding="utf-8")
+            document = novel_index.build_index(source)
+            first = dict(document["chapters"][0])
+            second = dict(document["chapters"][1])
+            cases = {
+                "string_line": [first | {"line_start": "1"}, second],
+                "boolean_sequence": [first | {"sequence": True}, second],
+                "duplicate_span": [first, second | {
+                    "line_start": first["line_start"],
+                    "line_end": first["line_end"],
+                    "content_sha256": first["content_sha256"],
+                }],
+                "gap": [first, second | {"line_start": second["line_start"] + 1}],
+                "bad_hash": [first | {"content_sha256": "bad"}, second],
+            }
+            for name, rows in cases.items():
+                with self.subTest(name=name):
+                    candidate = dict(document)
+                    candidate["chapters"] = rows
+                    candidate["chapter_count"] = len(rows)
+                    index_path = root / f"{name}.json"
+                    index_path.write_text(json.dumps(candidate), encoding="utf-8")
+                    result = novel_index.verify_index(index_path, source)
+                    self.assertFalse(result["verified"], result)
+                    self.assertTrue(result["problems"])
+
+            count_mismatch = dict(document)
+            count_mismatch["chapter_count"] = 99
+            index_path = root / "count.json"
+            index_path.write_text(json.dumps(count_mismatch), encoding="utf-8")
+            self.assertFalse(novel_index.verify_index(index_path, source)["verified"])
 
 
 class SampleTests(unittest.TestCase):
@@ -373,9 +422,11 @@ class OwnershipTests(unittest.TestCase):
     def test_declared_analysis_artifacts_are_owned(self) -> None:
         for relative in (
             "项目开发/source-analysis/_index.json",
+            "项目开发/source-analysis/_progress.md",
             "项目开发/source-analysis/triage.md",
             "项目开发/source-analysis/episode-candidates.jsonl",
             "项目开发/source-analysis/adaptation-value.md",
+            "项目开发/source-analysis/chapters/ch-1-extract.md",
         ):
             with self.subTest(relative=relative):
                 self.assertEqual(
@@ -389,14 +440,22 @@ class OwnershipTests(unittest.TestCase):
             "short-drama-develop",
         )
 
-    def test_generated_chapter_files_stay_owner_unconstrained(self) -> None:
-        # Per-chapter names are generated, so declaring them is impossible;
-        # they follow the same rule as every other undeclared path.
-        self.assertIsNone(
-            self.project_tool._expected_path_owner(
-                "项目开发/source-analysis/chapters/ch-1-extract.md"
-            )
+    def test_chapter_ownership_is_bounded_to_declared_markdown_files(self) -> None:
+        for relative in (
+            "项目开发/source-analysis/chapters/notes.json",
+            "项目开发/source-analysis/chapters/nested/ch-1-extract.md",
+        ):
+            with self.subTest(relative=relative):
+                self.assertIsNone(self.project_tool._expected_path_owner(relative))
+
+    def test_documented_index_flow_uses_scratch_then_publication(self) -> None:
+        skill = (SUITE / "skills/short-drama-novel-analyze/SKILL.md").read_text(
+            encoding="utf-8"
         )
+        self.assertIn("source-analysis/_work/_index.next.json", skill)
+        self.assertIn("project_tool.py publish", skill)
+        self.assertIn("--owner short-drama-novel-analyze", skill)
+        self.assertNotIn("--out 项目开发/source-analysis/_index.json", skill)
 
 
 class CommandLineTests(unittest.TestCase):
@@ -435,6 +494,64 @@ class CommandLineTests(unittest.TestCase):
             self.assertEqual(
                 novel_index.main(["coverage", str(index_path), str(analysis)]), 0
             )
+
+    def test_index_creates_the_documented_output_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "输入" / "原著.txt"
+            source.parent.mkdir()
+            source.write_text(chapters(["一", "二", "三"]) + "\n", encoding="utf-8")
+            index_path = root / "项目开发/source-analysis/_work/_index.next.json"
+
+            self.assertEqual(
+                novel_index.main(["index", str(source), "--out", str(index_path)]), 0
+            )
+            self.assertTrue(index_path.is_file())
+
+    def test_cli_json_is_safe_on_legacy_ascii_code_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "输入 小说.txt"
+            source.write_text(chapters(["一", "二", "三"]) + "\n", encoding="utf-8")
+            index_path = root / "项目 开发/_index.json"
+            environment = os.environ.copy()
+            environment["PYTHONIOENCODING"] = "ascii"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "index",
+                    str(source),
+                    "--out",
+                    str(index_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(json.loads(completed.stdout)["chapter_count"], 3)
+            self.assertTrue(index_path.is_file())
+
+    def test_index_replace_failure_preserves_the_previous_index(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "book.txt"
+            source.write_text(chapters(["一", "二", "三"]) + "\n", encoding="utf-8")
+            index_path = root / "_index.json"
+            index_path.write_text("previous index\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(novel_index.os, "replace", side_effect=OSError("disk")),
+                self.assertRaises(OSError),
+            ):
+                novel_index.main(["index", str(source), "--out", str(index_path)])
+
+            self.assertEqual(index_path.read_text(encoding="utf-8"), "previous index\n")
+            self.assertEqual(list(root.glob("._index.json.*.tmp")), [])
 
     def test_index_exits_nonzero_when_it_has_problems(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -478,4 +595,3 @@ class HeadingLineTests(unittest.TestCase):
         index = build_from(f"{long_title}\n{prose()}\n\n第二章 标题\n{prose()}\n")
         self.assertEqual(index["chapter_count"], 2)
         self.assertEqual(index["long_heading_lines_skipped"], 0)
-
