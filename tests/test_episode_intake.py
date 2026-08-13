@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -39,11 +40,14 @@ def serial(count: int, newline: bytes = b"\n", body_lines: int = 2) -> bytes:
 
 
 def run_cli(*args: str | Path) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "cp1252"
     return subprocess.run(
         [sys.executable, str(SCRIPT), *(str(arg) for arg in args)],
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=env,
     )
 
 
@@ -245,7 +249,13 @@ class ProgressAndMergeTests(unittest.TestCase):
         self.assertEqual(map_before, replay.read_bytes())
         self.assertEqual(checkpoint_before, self.checkpoint.read_bytes())
         self.assertEqual(result["added"], [])
-        self.assertEqual([json.loads(line)["episode_id"] for line in replay.read_text().splitlines()], ["EP001", "EP002", "EP004"])
+        self.assertEqual(
+            [
+                json.loads(line)["episode_id"]
+                for line in replay.read_text(encoding="utf-8").splitlines()
+            ],
+            ["EP001", "EP002", "EP004"],
+        )
 
     def test_merge_conflict_or_oversized_batch_does_not_overwrite(self) -> None:
         initial = self.batch("one.jsonl", [{"episode_id": "EP001", "beat": "old"}])

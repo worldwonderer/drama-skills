@@ -693,12 +693,12 @@ def main(argv: list[str] | None = None) -> int:
             result: Any = {"output": str(args.out), "episode_count": document["episode_count"]}
             if document["problems"]:
                 result["problems"] = document["problems"]
-                print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+                print(json.dumps(result, sort_keys=True))
                 return 2
         elif args.command == "verify":
             result = verify_index(args.index, args.source)
             if not result["verified"]:
-                print(json.dumps(result, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+                print(json.dumps(result, sort_keys=True), file=sys.stderr)
                 return 1
         elif args.command == "slice":
             content = slice_episode(args.index, args.source, args.episode_id, args.out)
@@ -716,9 +716,9 @@ def main(argv: list[str] | None = None) -> int:
                 batch_size=args.batch_size,
             )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
-        print(json.dumps({"error": str(error)}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps({"error": str(error)}), file=sys.stderr)
         return 1
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 

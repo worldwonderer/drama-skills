@@ -64,7 +64,8 @@
 - **Windows 安装不再把 CRLF 换行误判为套件混装**。清单生成器与运行时校验器现在都按
   规范化后的 LF 文本计算 SHA-256；仅 CRLF/LF 不同的文件保持等价，真实内容变化仍会阻断。
   CI 新增真实 `windows-latest` 安装回归，覆盖此前 `/short-drama` 初始化在预检阶段被
-  `short-drama-assets/SKILL.md` hash mismatch 阻断的问题。
+  `short-drama-assets/SKILL.md` hash mismatch 阻断的问题。机器可读 CLI JSON 也改为 ASCII-safe
+  转义，Windows 仍使用旧控制台代码页时，中文项目路径与标题不再导致输出阶段编码失败。
 
 - **短剧创作台的界面细节整轮返修**。内容目录里每行的汉字圆牌换成一套笔画一致的线描图标；
   集号与场次号改用等高数字，此前正文衬线把 `EP001` 渲染成 `EP0o1`；搜索框、项目下拉与

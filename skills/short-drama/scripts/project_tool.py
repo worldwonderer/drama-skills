@@ -4363,7 +4363,10 @@ def main(argv: list[str] | None = None) -> int:
                 text_exceptions=exceptions,
                 omitted_paths=args.omissions,
             )
-        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        # Keep machine-readable CLI output ASCII-safe. On Windows, redirected
+        # stdout may still use a legacy code page even when project paths and
+        # creator-facing JSON contain Unicode; JSON escapes round-trip exactly.
+        print(json.dumps(result, sort_keys=True))
         # `verify` is the only subcommand that reports a verdict in its payload
         # instead of raising, so it needs the same exit convention the check
         # scripts use: a tampered package must fail a CI step or an && chain.

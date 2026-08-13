@@ -190,6 +190,9 @@ class InstallationResolutionTests(unittest.TestCase):
             project = temp / "创作者 项目"
             env = os.environ.copy()
             env["CODEX_HOME"] = str(temp / "empty CODEX_HOME")
+            # Reproduce the legacy redirected code page used by Windows
+            # runners; machine-readable JSON must stay round-trippable.
+            env["PYTHONIOENCODING"] = "cp1252"
 
             initialized = subprocess.run(
                 [
