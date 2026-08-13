@@ -41,6 +41,7 @@ license: MIT
 | 创作者意图 | 路由 |
 |---|---|
 | 开发点子、故事承诺、系列、分集地图 | `$short-drama-develop` |
+| 导入已有多集完整剧本/散稿并生成或补分集地图 | `$short-drama-develop` 先按文件实际结构建立候选边界索引，每次只切当前集并续跑；语义边界与 map 内容由 Agent 判断，脚本不硬编码 |
 | 导入小说/长材料并做可追溯分集与资产候选预览 | `$short-drama-novel-analyze` → `$short-drama-develop` → 接受改编/分集 → `$short-drama-write` → 接受剧本 → `$short-drama-assets` |
 | 判断一本长篇值不值得改、先看抽样快评 | `$short-drama-novel-analyze` |
 | 写/改单集契约、因果节拍、剧本 | `$short-drama-write` |

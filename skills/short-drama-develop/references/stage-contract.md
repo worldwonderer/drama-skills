@@ -86,6 +86,8 @@
 | STY-15 | reviewed_invariant | Calibrate each information release to what its visible carrier directly supports, while keeping unproved identity, cause, motive, or mechanism explicit as unresolved inference. |
 | STY-16 | craft_default | Before scene work, estimate each planned episode's shot and duration magnitude from the project's own accepted ratios, and resolve order-of-magnitude outliers in the map; the estimate informs the creator and never blocks delivery. |
 | STY-17 | reviewed_invariant | A premise device separates its creator-accepted contract (scope, failure conditions, cost, whether its own declarations are reliable) from in-fiction disclosure; the contract is accepted before the device first takes effect, while disclosure may lag, stay partial, or be misstated by a character or the device itself. Every later device ability or exemption traces to a contract clause—an untraceable one is retroactive widening—and the audience not yet knowing every boundary is never itself a defect. |
+| STY-18 | structural_invariant | A multi-episode source is read through a verified exact-byte episode index; source drift invalidates every old span, and resume derives missing IDs from the current episode map rather than a last-completed guess. |
+| STY-19 | craft_default | For a multi-episode source, the Agent chooses each batch from this file's measured episode spans, semantic complexity, and available context, then reads only the current slices and compact accepted handoff; no fixed episode quota substitutes for that judgment. |
 
 规则分级由高到低：`structural_invariant`（结构缺陷，阻断）、
 `reviewed_invariant`（需证据判断）、`craft_default`（常用做法，可覆盖）、

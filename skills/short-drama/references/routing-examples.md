@@ -3,6 +3,7 @@
 | Request | Route | Important behavior |
 |---|---|---|
 | “根据这个点子写第一集” | write, or develop if creator asks for alternatives | do not force series planning |
+| “这份完整剧本有 54 集，帮我生成/补 episode map” | develop multi-episode intake | Agent inspects this file's boundaries; index once, slice one episode at a time, land small resumable batches; never inline or reread the whole season |
 | “把这份旧剧本的人物场景道具拆出来” | assets via minimal write-owned intake | preserve original bytes; preview normalization |
 | “先写所有角色定妆图提示词” | image-prompts | require accepted asset identities/Looks, not storyboard |
 | “这段对话拆成镜头” | storyboard | establish coverage and purpose before camera decoration |

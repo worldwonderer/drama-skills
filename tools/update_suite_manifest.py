@@ -22,6 +22,12 @@ EXECUTABLE_SUFFIXES = (
 )
 
 
+def text_sha256(data: bytes) -> str:
+    """Hash suite text in its canonical LF form."""
+
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+
 def is_local_noise(parts: tuple[str, ...]) -> bool:
     """True only for known-noise artifacts, never for arbitrary dot-paths."""
 
@@ -88,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("unexpected suite-ref files: " + ", ".join(sorted(unexpected_refs)))
     forbidden_suffixes = {".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe"}
     files = {
-        path.relative_to(skills).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        path.relative_to(skills).as_posix(): text_sha256(path.read_bytes())
         for path in sorted(skills.rglob("*"))
         if path.is_file()
         and path != manifest_path
@@ -101,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    manifest_hash = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    manifest_hash = text_sha256(manifest_path.read_bytes())
     # Every field a child pins from the manifest is copied, not just the hash.
     # Propagating one of them leaves a version bump half-applied, which the
     # verifier then rejects as a mixed install — correct, but only after the

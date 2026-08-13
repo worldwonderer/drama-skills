@@ -67,6 +67,7 @@ Route by the creator's actual job, not by an internal pipeline phase.
 | Creator asks for | Owning skill | Minimum prerequisite |
 |---|---|---|
 | 从想法开发短剧 | `short-drama-develop` | creator brief or conversation |
+| 从已有多集完整剧本生成或补分集地图 | `short-drama-develop` | preserved source; Agent-selected episode boundaries, then verified one-episode slices |
 | 写/改一集剧本 | `short-drama-write` | idea, episode card, outline, or existing project |
 | 从剧本拆人物场景道具 | `short-drama-assets` | accepted canonical script, or a source script to normalize with preview |
 | 做 Look Development / 风格帧提示词 | `short-drama` → `short-drama-image-prompts` | accepted observable visual direction; asset facts when the frame depicts them |

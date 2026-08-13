@@ -77,6 +77,10 @@ plain language. The two forms are interchangeable in the examples below.
 # 0. With a source novel (optional): triage before committing to a full pass
 Use $short-drama-novel-analyze to triage 输入/novel.txt and tell me whether it is worth adapting
 
+# With a complete multi-episode script (optional): infer this file's boundaries,
+# read one episode at a time, and resume the episode map from disk
+Use $short-drama-develop to build the episode map from 输入/full-screenplay.txt without loading the whole season into context
+
 # 1. New project
 Use $short-drama to init a vertical 9:16 urban face-slapping short-drama project
 
@@ -129,7 +133,7 @@ flowchart LR
 |---|---|
 | `short-drama` | Init, routing, visual direction/Look Development, state, acceptance/review lifecycle, delivery |
 | `short-drama-novel-analyze` | Sampled adaptation triage, chapter index, per-chapter function extraction, story units and rhythm, adaptation value, and episode candidates for a long source |
-| `short-drama-develop` | Traceable novel/long-form adaptation, story engine, episode map, director brief, genre & hook playbook |
+| `short-drama-develop` | Traceable adaptation, Agent-led indexing/slicing/resume for complete multi-episode scripts, story engine, episode map, director brief, genre & hook playbook |
 | `short-drama-write` | Episode contract, causal beats, performable screenplay, and the project's accepted production dialect |
 | `short-drama-assets` | Character/Look, Location/View, Prop/State, optional voice direction, continuity decisions |
 | `short-drama-image-prompts` | Lookdev style frames, reusable character/location/prop reference prompts, and scoped edits |
@@ -138,9 +142,11 @@ flowchart LR
 | `short-drama-review` | Structural/content review, project-bounded diagnosis from authorized production observations, and independent verdicts |
 
 `$short-drama` is the entry router: it initializes, resumes, recovers, and delivers
-projects, dispatching the actual work to the matching skill. An existing screenplay
-can enter normalization or asset extraction directly; an idea or long-form source
-enters through story development.
+projects, dispatching the actual work to the matching skill. An existing single-episode
+screenplay can enter normalization or asset extraction directly. When a complete
+multi-episode script needs an episode map, development indexes its actual structure once,
+reads one verified slice at a time, and resumes from the on-disk map. An idea or long-form
+source enters through story development.
 
 The three single-frame prompt paths have distinct ownership: project-level
 `lookdev_frame` prompts test an accepted visual direction; asset prompts preserve

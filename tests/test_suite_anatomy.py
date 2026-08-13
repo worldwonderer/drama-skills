@@ -573,7 +573,7 @@ class SuiteAnatomyTests(unittest.TestCase):
         self.assertEqual(policy_ref["field"], "/text_policy")
         self.assertIn("text_policy", prop)
 
-    def test_manifest_covers_every_public_file_and_exact_bytes(self) -> None:
+    def test_manifest_covers_every_public_file_and_canonical_text(self) -> None:
         manifest = json.loads((CORE / "suite-manifest.json").read_text(encoding="utf-8"))
         recorded = manifest["files"]
         child_refs = {
@@ -592,7 +592,8 @@ class SuiteAnatomyTests(unittest.TestCase):
         self.assertEqual(set(recorded), actual)
         for relative, expected_hash in recorded.items():
             path = SUITE / "skills" / relative
-            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected_hash)
+            canonical = path.read_bytes().replace(b"\r\n", b"\n")
+            self.assertEqual(hashlib.sha256(canonical).hexdigest(), expected_hash)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,24 @@ jobs:
       - name: unit tests
         run: python -B -m unittest discover -s tests -v
 
+  windows-install:
+    name: Windows CRLF installation
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Run Windows regressions for issues 26 and 27
+        run: >-
+          python -B -m unittest
+          tests.test_installation_resolution
+          tests.test_episode_intake
+          -v
+      - name: Verify checked-out suite
+        run: python tools/verify_suite.py skills/short-drama
+
   # Tool versions are pinned on purpose. This repository has no dependency
   # manifest, so an unpinned `pip install ruff` turns main red the next time
   # ruff changes its default rule set — with nobody having touched the code.
@@ -54,6 +72,7 @@ jobs:
         run: >
           mypy skills/short-drama/scripts/project_tool.py
           skills/short-drama/scripts/dashboard_server.py
+          skills/short-drama-develop/scripts/episode_intake.py
           --ignore-missing-imports
       - uses: actions/setup-node@v4
         with:

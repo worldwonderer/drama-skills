@@ -1,4 +1,3 @@
-import hashlib
 import importlib.util
 import json
 import os
@@ -65,6 +64,49 @@ class InstallationResolutionTests(unittest.TestCase):
             result = json.loads(completed.stdout)
             self.assertEqual(len(result["checked_skills"]), len(PUBLIC_SKILLS))
 
+    def test_windows_crlf_checkout_verifies(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            skills = copy_installed_suite(temp)
+            for path in skills.rglob("*"):
+                if not path.is_file():
+                    continue
+                data = path.read_bytes()
+                path.write_bytes(data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(skills / "short-drama/scripts/suite_verify.py"),
+                    str(skills / "short-drama"),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(completed.stdout)
+            self.assertEqual(len(result["checked_skills"]), len(PUBLIC_SKILLS))
+
+            tampered = skills / "short-drama-assets/SKILL.md"
+            tampered.write_bytes(tampered.read_bytes() + b"REAL-CONTENT-CHANGE\r\n")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(skills / "short-drama/scripts/suite_verify.py"),
+                    str(skills / "short-drama"),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn(
+                "content hash mismatch: short-drama-assets/SKILL.md",
+                completed.stderr,
+            )
+
     def test_verifier_checks_each_exposed_symlink_target(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
@@ -120,7 +162,8 @@ class InstallationResolutionTests(unittest.TestCase):
     def test_child_refs_are_relative_and_resolve_to_the_single_sibling_core(self) -> None:
         manifest = (SUITE / "skills/short-drama/suite-manifest.json").resolve()
         manifest_document = json.loads(manifest.read_text(encoding="utf-8"))
-        manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        generator = import_module_from_path("child_ref_hash", UPDATE_TOOL)
+        manifest_hash = generator.text_sha256(manifest.read_bytes())
         children = [
             child
             for child in (SUITE / "skills").iterdir()
@@ -592,6 +635,29 @@ class InstallationResolutionTests(unittest.TestCase):
                 )
                 checked += 1
         self.assertGreaterEqual(checked, 100)
+
+    def test_generator_and_verifier_share_one_text_hash_definition(self) -> None:
+        generator = import_module_from_path("update_tool_hash", UPDATE_TOOL)
+        verifier = import_module_from_path(
+            "shipped_verifier_hash", SUITE / "skills/short-drama/scripts/suite_verify.py"
+        )
+        samples = (
+            b"one\ntwo\n",
+            b"one\r\ntwo\r\n",
+            b"one\rtwo\r",
+            b"embedded\x00bytes\r\n",
+        )
+        for data in samples:
+            with self.subTest(data=data):
+                self.assertEqual(generator.text_sha256(data), verifier.text_sha256(data))
+        self.assertEqual(
+            verifier.text_sha256(b"one\ntwo\n"),
+            verifier.text_sha256(b"one\r\ntwo\r\n"),
+        )
+        self.assertNotEqual(
+            verifier.text_sha256(b"one\ntwo\n"),
+            verifier.text_sha256(b"one\rtwo\r"),
+        )
 
     def test_executable_content_is_never_treated_as_noise(self) -> None:
         """A payload planted inside a cache directory must stay reported."""

@@ -53,6 +53,12 @@ EXECUTABLE_SUFFIXES = (
 )
 
 
+def text_sha256(data: bytes) -> str:
+    """Hash suite text in its canonical LF form."""
+
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+
 def is_local_noise(parts: tuple[str, ...]) -> bool:
     """True only for known-noise artifacts, never for arbitrary dot-paths."""
 
@@ -184,7 +190,7 @@ def verify_suite(core: Path) -> dict[str, Any]:
     manifest = load_json(manifest_path)
     if manifest.get("trust_boundary") != EXPECTED_TRUST_BOUNDARY:
         raise ValueError("suite-manifest trust_boundary violates the text-only runtime contract")
-    manifest_hash = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    manifest_hash = text_sha256(manifest_path.read_bytes())
     skills_root = core.parent
     expected = manifest.get("public_skills")
     if not isinstance(expected, list) or not all(isinstance(name, str) for name in expected):
@@ -231,7 +237,7 @@ def verify_suite(core: Path) -> dict[str, Any]:
     if missing:
         raise ValueError(f"missing manifest files: {', '.join(missing)}")
     for relative, expected_hash in files.items():
-        actual_hash = hashlib.sha256((skills_root / relative).read_bytes()).hexdigest()
+        actual_hash = text_sha256((skills_root / relative).read_bytes())
         if actual_hash != expected_hash:
             raise ValueError(f"content hash mismatch: {relative}")
 

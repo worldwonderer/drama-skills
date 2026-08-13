@@ -151,6 +151,7 @@ DECLARED_PROJECT_ARTIFACT_OWNERS: dict[str, str] = {
     "development/director-brief.md": "short-drama-develop",
     "development/adaptation-map.jsonl": "short-drama-develop",
     "development/series-arc.json": "short-drama-develop",
+    "development/episode-intake-index.json": "short-drama-develop",
     "development/episode-map.jsonl": "short-drama-develop",
     "development/lookdev-image-prompt-specs.jsonl": "short-drama-image-prompts",
     "development/lookdev-prompts.md": "short-drama-image-prompts",
