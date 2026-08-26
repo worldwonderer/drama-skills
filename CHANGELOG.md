@@ -4,10 +4,14 @@
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 规则分级变化按其对创作者的约束力记录：`structural_invariant` 与 `reviewed_invariant`
-的新增或收紧记为 **变更**（可能阻断既有产物），`craft_default` 与 `taste_option` 记为
-**新增**（可被创作者覆盖）。
+的新增或收紧记为 `Changed`（可能阻断既有产物），`craft_default` 与 `taste_option` 记为
+`Added`（可被创作者覆盖）。
 
-## [未发布]
+自 `v0.6.2` 起，小节名采用 Keep a Changelog 的六个英文类别（`Added` / `Changed` /
+`Deprecated` / `Removed` / `Fixed` / `Security`），正文仍为中文；`v0.6.1` 及更早的小节
+保持原样。
+
+## [Unreleased]
 
 ## [0.6.1] - 2026-08-25
 
@@ -1189,7 +1193,7 @@ image-prompts / storyboard / video-prompts / review。
 fresh-agent 双臂盲测、独立 reviewer verdict 与 protected-release gate 三项未完成，
 由维护者知情后放行；相应记录以 `hold` 而非 `promotion` 留在仓库外的受控工作区。
 
-[未发布]: https://github.com/zenstory-ai/drama-skills/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/zenstory-ai/drama-skills/compare/v0.6.1...HEAD
 [0.6.1]: https://github.com/zenstory-ai/drama-skills/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/zenstory-ai/drama-skills/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zenstory-ai/drama-skills/compare/v0.4.2...v0.5.0
