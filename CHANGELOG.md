@@ -13,6 +13,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+**Windows 上的参考图不再被截断**。生产环节按描述符读参考图时缺 `O_BINARY`，Windows 因此按文本
+模式打开：读到第一个 `0x1A` 就停，`\r\n` 也被折成 `\n`。PNG 签名的第七个字节正是 `0x1A`，
+所以参考图以 5 字节发给供应商、换回 `invalid_image_file`（HTTP 400）——`references` 与
+`reference_bindings` 在这个平台上从未成功过。v0.6.1 给 Dashboard 做过同一处修复，生产环节漏掉了。
+POSIX 行为不变。
+
 ## [0.6.1] - 2026-08-25
 
 维护版本。解除两处挡住创作者的限制——Dashboard 在 Windows 上无法启动，图片提示词校验器用固定

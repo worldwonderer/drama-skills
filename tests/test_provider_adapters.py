@@ -399,6 +399,46 @@ class ProviderRuntimeTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "size limit"):
                     provider_adapters._multipart({}, [path])
 
+    def test_reference_bytes_survive_a_text_mode_descriptor(self) -> None:
+        # 回归：_read_reference 曾用 os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        # 打开描述符。Windows 没有 O_BINARY 时那是文本模式的描述符——os.read 会
+        # 把每个 \r\n 折成 \n，并在第一个 0x1A（DOS 文件结束符）处停住。PNG 签名
+        # 是 89 50 4E 47 0D 0A 1A 0A，第七个字节正是 0x1A，于是每张参考图都以
+        # 5 字节送到 gpt-image-2，供应商回 invalid_image_file / HTTP 400，
+        # references 与 reference_bindings 在这个平台上从未成功过。
+        #
+        # POSIX 没有文本模式，直接断言读回的字节数无法在这里变红。所以本例把
+        # O_BINARY 立成一个真实常量，并让 os.read 在调用方没有点名二进制时按
+        # Windows CRT 的方式截断：断言的是这段代码有没有「要求」二进制模式。
+        payload = b"\x89PNG\r\n\x1a\nIHDR\r\ntail"
+        native_binary = getattr(os, "O_BINARY", 0)
+        probe = native_binary or 0x8000  # MSVC CRT 的 _O_BINARY
+        real_open, real_read = os.open, os.read
+        text_mode: set[int] = set()
+
+        def fake_open(target, flags, *args, **kwargs):  # type: ignore[no-untyped-def]
+            descriptor = real_open(
+                target, (flags & ~probe) | native_binary, *args, **kwargs
+            )
+            if not flags & probe:
+                text_mode.add(descriptor)
+            return descriptor
+
+        def fake_read(descriptor: int, length: int) -> bytes:
+            data = real_read(descriptor, length)
+            if descriptor in text_mode:
+                return data.replace(b"\r\n", b"\n").split(b"\x1a", 1)[0]
+            return data
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reference.png"
+            path.write_bytes(payload)
+            with mock.patch.object(os, "O_BINARY", probe, create=True), mock.patch.object(
+                os, "open", fake_open
+            ), mock.patch.object(os, "read", fake_read):
+                content = provider_adapters._read_reference(path)
+        self.assertEqual(content, payload)
+
     def test_cli_selftest_and_safe_failure_do_not_expose_credentials(self) -> None:
         completed = subprocess.run(
             [sys.executable, str(SCRIPT), "--selftest"],

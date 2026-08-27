@@ -547,7 +547,9 @@ def _read_reference(path: Path) -> bytes:
         raise ValueError("reference is not a regular file")
     if before.st_size > MAX_REFERENCE_BYTES:
         raise ValueError("reference exceeds the provider input size limit")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    # Windows opens files in text mode unless told otherwise, which stops the
+    # read at the first 0x1A byte -- the seventh byte of every PNG signature.
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags)
     try:
         opened = os.fstat(descriptor)
