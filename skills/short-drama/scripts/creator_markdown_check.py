@@ -318,6 +318,12 @@ def main() -> int:
     parser.add_argument("episode", type=Path, help="包含五份 Markdown 的剧集目录")
     parser.add_argument("--project-root", type=Path, help="用于解析 REF 项目相对路径")
     args = parser.parse_args()
+    # 诊断与剧集路径都是中文。stdout 重定向时 Windows 用 ANSI 代码页，默认的
+    # strict 处理器会在打印这一步抛错；stderr 早就是 backslashreplace，这里让
+    # stdout 用同一个处理器：能编码就照常显示中文，不能编码才退成转义。
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(errors="backslashreplace")
     errors = validate_episode(args.episode, args.project_root)
     if errors:
         for error in errors:

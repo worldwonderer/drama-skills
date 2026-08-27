@@ -28,6 +28,11 @@ UTF-8：产物已经写完落盘，进程却在打印那一步抛 `UnicodeEncode
 与 `adapter-contract.md` 早已写明的可移植规则一致；写进文件的 JSON 与 JSONL 仍是原样的 UTF-8，
 创作者打开产物看到的中文不变。
 
+`creator_markdown_check.py` 不打印 JSON，直接写中文诊断与剧集路径，同一个重定向下也会抛错——
+一份完全合格的剧集退出码从 0 变成 1，不合格的剧集只剩一段 traceback，看不到哪里不对。它的 stdout
+现在与 stderr 用同一个 `backslashreplace` 处理器：终端能显示中文时照常显示，不能编码时退成转义，
+不再中断。
+
 ## [0.6.1] - 2026-08-25
 
 维护版本。解除两处挡住创作者的限制——Dashboard 在 Windows 上无法启动，图片提示词校验器用固定

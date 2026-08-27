@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
@@ -393,6 +396,38 @@ class CreatorFirstGoldenTests(unittest.TestCase):
 
     def test_creator_markdown_validator_accepts_the_golden_episode(self) -> None:
         self.assertEqual(creator_markdown_check.validate_episode(EPISODE, ROOT), [])
+
+    def test_validator_cli_survives_a_non_utf8_stdout_encoding(self) -> None:
+        """回归：CLI 用 print(f"...") 直接写 stdout，而诊断与剧集路径都是中文。
+
+        stdout 重定向到文件或管道时 Windows 用 ANSI 代码页，默认的 strict 处理器
+        在打印那一步抛 UnicodeEncodeError：一份完全合格的剧集退出码从 0 变成 1，
+        不合格的剧集则只剩一段 traceback，创作者看不到到底哪里不对。stderr 早已
+        是 backslashreplace，所以只有 stdout 会这样。POSIX 上用 PYTHONIOENCODING
+        能走到同一个 TextIOWrapper，这条在开发机上就会红。
+        """
+
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            episode = project / "剧集/EP001"
+            episode.parent.mkdir(parents=True)
+            shutil.copytree(EPISODE, episode)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "skills/short-drama/scripts/creator_markdown_check.py"),
+                    str(episode),
+                    "--project-root",
+                    str(project),
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "ascii"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(result.stdout.startswith("OK: "), result.stdout)
 
     def test_creator_markdown_validator_accepts_a_real_ref_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
