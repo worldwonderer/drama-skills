@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -593,6 +594,46 @@ class ScreenplayIndexTests(unittest.TestCase):
                 ["scene_heading", "comment", "dialogue"],
             )
 
+    def test_cli_summary_survives_a_non_utf8_stdout_encoding(self) -> None:
+        """回归：成功摘要曾用 ensure_ascii=False 打印，而摘要里带着输出路径。
+
+        stdout 重定向到文件或管道时，Windows 用的是 ANSI 代码页而不是 UTF-8；
+        本仓库的路径含中文，于是索引已经写完落盘之后，进程才在打印那一步抛
+        UnicodeEncodeError，退出码从 0 变成 1，后面的 --fail-on-review 判定也
+        不再执行——调用方据退出码判断，会把做完的活当成失败。POSIX 上用
+        PYTHONIOENCODING 能触发同一个 TextIOWrapper 路径，所以这条在开发机上
+        就会红，不必等 Windows runner。
+        """
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "剧集"
+            root.mkdir()
+            source = root / "剧本.md"
+            source.write_bytes(
+                (
+                    "# EP001 夜班\n\n"
+                    "## EP001-SC001 内 · 档案室 · 夜\n\n"
+                    "林岚：签字不是我的。\n"
+                ).encode()
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    str(source),
+                    "--output",
+                    str(root / "索引.jsonl"),
+                    "--speaker",
+                    "林岚",
+                ],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "ascii"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["review_status"], "clean")
 
     def test_fullwidth_dialect_tag_is_diagnosed_without_dropping_its_block(self) -> None:
         """The diagnosis must not renumber block IDs downstream artifacts cite."""

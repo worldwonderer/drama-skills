@@ -435,7 +435,7 @@ def main() -> int:
     except (OSError, ValidationError) as exc:
         print(f"image prompt check failed: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0
 
 

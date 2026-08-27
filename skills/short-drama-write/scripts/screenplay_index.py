@@ -1079,9 +1079,9 @@ def main(argv: list[str] | None = None) -> int:
             no_previous=args.no_previous,
         )
     except (OSError, UnicodeDecodeError, ValueError) as error:
-        print(json.dumps({"error": str(error)}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps({"error": str(error)}, ensure_ascii=True), file=sys.stderr)
         return 1
-    print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+    print(json.dumps(summary, ensure_ascii=True, sort_keys=True))
     if args.fail_on_review and summary["review_status"] != "clean":
         return 2
     return 0

@@ -298,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("{}: {}".format(args.index, error))
 
     report = estimate(screenplay, blocks, project, review)
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json.dumps(report, ensure_ascii=True, indent=2, sort_keys=True))
     # An estimate is never a verdict, so this exits successfully even when the
     # episode lands far from its target. Blocking here would turn a reported
     # number into the cross-project threshold this suite refuses to carry.

@@ -321,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     except CheckError as error:
         print(f"{type(error).__name__}: {error}", file=sys.stderr)
         return 2
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    print(json.dumps(result, ensure_ascii=True, sort_keys=True))
     return 0 if result["status"] == "pass" else 1
 
 

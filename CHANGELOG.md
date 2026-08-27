@@ -21,6 +21,13 @@
 `reference_bindings` 在这个平台上从未成功过。v0.6.1 给 Dashboard 做过同一处修复，生产环节漏掉了。
 POSIX 行为不变。
 
+**Windows 上的校验脚本不再把做完的活报成失败**。十二处命令行输出用 `ensure_ascii=False` 打印
+JSON，而输出里带着中文路径与中文条目。stdout 重定向到文件或管道时，Windows 用 ANSI 代码页而不是
+UTF-8：产物已经写完落盘，进程却在打印那一步抛 `UnicodeEncodeError`，退出码从 0 变成 1，
+`screenplay_index.py` 的 `--fail-on-review` 判定也不再执行。命令行 JSON 现在一律 ASCII 转义，
+与 `adapter-contract.md` 早已写明的可移植规则一致；写进文件的 JSON 与 JSONL 仍是原样的 UTF-8，
+创作者打开产物看到的中文不变。
+
 ## [0.6.1] - 2026-08-25
 
 维护版本。解除两处挡住创作者的限制——Dashboard 在 Windows 上无法启动，图片提示词校验器用固定

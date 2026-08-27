@@ -1342,9 +1342,9 @@ def main() -> int:
             trusted_seal_path=args.trusted_seal,
         )
     except (GateError, FileNotFoundError) as exc:
-        print(json.dumps({"passed": False, "error": str(exc)}, ensure_ascii=False))
+        print(json.dumps({"passed": False, "error": str(exc)}, ensure_ascii=True))
         return 2
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result["passed"] else 1
 
 
