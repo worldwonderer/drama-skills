@@ -13,6 +13,12 @@
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-30
+
+本版无需迁移，既有项目和目录结构不变。三项能力来自创作者实跑反馈（#81）：跨镜的服装与道具
+颜色可以锁住、本地创作台可以常驻、跑完的项目有了一条导出命令。`Changed` 里的两条收紧都是
+opt-in——不声明连续性锁的项目行为与 0.6.1 相同。
+
 ### Added
 
 **`project_tool.py export`**：把每集现有的五份创作文档与 `剧集/<EP>/制作成果/` 复制成一份交付
@@ -1286,7 +1292,8 @@ image-prompts / storyboard / video-prompts / review。
 fresh-agent 双臂盲测、独立 reviewer verdict 与 protected-release gate 三项未完成，
 由维护者知情后放行；相应记录以 `hold` 而非 `promotion` 留在仓库外的受控工作区。
 
-[Unreleased]: https://github.com/zenstory-ai/drama-skills/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/zenstory-ai/drama-skills/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/zenstory-ai/drama-skills/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/zenstory-ai/drama-skills/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/zenstory-ai/drama-skills/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zenstory-ai/drama-skills/compare/v0.4.2...v0.5.0
