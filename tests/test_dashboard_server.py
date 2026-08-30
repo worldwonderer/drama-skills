@@ -1168,13 +1168,96 @@ class DashboardSessionTests(unittest.TestCase):
             session_path = workspace / ".short-drama/dashboard.json"
             # Hold the serving lock so the spawned child exits without recording.
             with dashboard_server.hold_session_lock(session_path) as held:
-                self.assertIsNotNone(held)
+                self.assertTrue(held)
                 started = self.run_dashboard(
                     "--workspace", str(workspace), "--port", "0", "--detach"
                 )
             self.assertEqual(started.returncode, 1)
             self.assertIn("dashboard.log", started.stderr)
             self.assertNotIn("Traceback", started.stderr)
+
+    def test_an_unwritable_workspace_cannot_record_but_is_not_fatal(self) -> None:
+        """Serving never depended on the session record. A workspace the creator
+        can read but not write must still open, the way it did before sessions
+        existed -- so the failure is a typed signal main() can degrade on, not an
+        uncaught OSError, and liveness answers "no" instead of raising."""
+        if os.name == "nt" or os.geteuid() == 0:
+            self.skipTest("this platform cannot make a directory unwritable here")
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = self.make_workspace(directory)
+            session_path = workspace / ".short-drama/dashboard.json"
+            os.chmod(workspace, 0o555)
+            try:
+                with self.assertRaises(dashboard_server.SessionUnavailable):
+                    with dashboard_server.hold_session_lock(session_path):
+                        pass
+                self.assertFalse(dashboard_server.session_is_live(session_path))
+            finally:
+                os.chmod(workspace, 0o755)
+
+    def test_a_read_only_workspace_still_serves(self) -> None:
+        if os.name == "nt" or os.geteuid() == 0:
+            self.skipTest("this platform cannot make a directory unwritable here")
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = self.make_workspace(directory)
+            os.chmod(workspace, 0o555)
+            try:
+                server = create_server(workspace, port=0)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    connection = http.client.HTTPConnection(
+                        *server.server_address[:2], timeout=5
+                    )
+                    connection.request("GET", "/")
+                    self.assertEqual(connection.getresponse().status, 200)
+                    connection.close()
+                finally:
+                    server.shutdown()
+                    thread.join(5)
+                    server.server_close()
+            finally:
+                os.chmod(workspace, 0o755)
+
+    def test_a_record_for_another_workspace_is_not_this_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            mine = self.make_workspace(directory)
+            theirs = Path(directory) / "elsewhere"
+            theirs.mkdir()
+            record = {
+                "schema_version": dashboard_server.SESSION_SCHEMA,
+                "fingerprint": dashboard_server.workspace_fingerprint(theirs),
+                "workspace": str(theirs),
+            }
+            self.assertFalse(dashboard_server.session_matches(record, mine))
+            self.assertTrue(dashboard_server.session_matches(record, theirs))
+
+    def test_a_missing_workspace_is_refused_instead_of_created_and_served(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "typo"
+            result = self.run_dashboard(
+                "--workspace", str(missing), "--port", "0", "--detach"
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("not an existing directory", result.stderr)
+            self.assertFalse(missing.exists())
+
+    def test_the_server_stops_when_its_workspace_disappears(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = self.make_workspace(directory)
+            server = create_server(workspace, port=0)
+            self.addCleanup(server.server_close)
+            stopped = threading.Event()
+
+            class Recorder:
+                def shutdown(self) -> None:
+                    stopped.set()
+
+            dashboard_server.watch_workspace(Recorder(), workspace, interval=0.05)
+            shutil.rmtree(workspace)
+            self.assertTrue(
+                stopped.wait(10), "watchdog did not stop a server whose workspace is gone"
+            )
 
     def test_status_reports_nothing_running_without_a_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1218,10 +1301,10 @@ class DashboardSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             session_path = Path(directory) / ".short-drama/dashboard.json"
             with dashboard_server.hold_session_lock(session_path) as held:
-                self.assertIsNotNone(held)
+                self.assertTrue(held)
                 self.assertTrue(dashboard_server.session_is_live(session_path))
                 with dashboard_server.hold_session_lock(session_path) as second:
-                    self.assertIsNone(second)
+                    self.assertFalse(second)
             self.assertFalse(dashboard_server.session_is_live(session_path))
 
     def test_each_workspace_has_its_own_serving_lock(self) -> None:
@@ -1229,7 +1312,7 @@ class DashboardSessionTests(unittest.TestCase):
             mine = Path(directory) / "a/.short-drama/dashboard.json"
             theirs = Path(directory) / "b/.short-drama/dashboard.json"
             with dashboard_server.hold_session_lock(mine) as held:
-                self.assertIsNotNone(held)
+                self.assertTrue(held)
                 self.assertTrue(dashboard_server.session_is_live(mine))
                 self.assertFalse(dashboard_server.session_is_live(theirs))
 

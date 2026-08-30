@@ -1797,11 +1797,73 @@ def _manifest_problems(
     return problems
 
 
+def _same_directory(left: Path, right: Path) -> bool:
+    """Do these two paths name the same directory on disk?
+
+    String comparison is not enough: a case-insensitive volume and a filesystem
+    that stores a different Unicode normalisation both spell one directory two
+    ways, and either spelling would otherwise slip past a containment check.
+    """
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
+def _require_safe_export_destination(destination: Path, root: Path) -> None:
+    """Refuse any destination that would take the project down with it.
+
+    The export replaces its destination directory wholesale, so a destination
+    that is -- or contains -- the project being exported would delete the
+    source. Ancestors matter as much as descendants here.
+    """
+    if destination == root or root in destination.parents:
+        raise ValueError("export destination must live outside the project root")
+    for ancestor in (root, *root.parents):
+        if destination == ancestor or _same_directory(destination, ancestor):
+            raise ValueError(
+                "export destination must not be the project root or any directory containing it"
+            )
+
+
+def _require_replaceable_export(destination: Path) -> None:
+    """Only ever overwrite a directory this command itself produced.
+
+    `--overwrite` removes the destination tree. Without this check a mistyped
+    path turns an ordinary directory into a deletion, and nothing else in this
+    tool can erase a directory outside the project.
+    """
+    if not destination.exists():
+        return
+    details = os.lstat(destination)
+    if _is_link_or_reparse(details) or not stat.S_ISDIR(details.st_mode):
+        raise ProjectConflictError("export destination is not a regular directory")
+    manifest = destination / "manifest.json"
+    try:
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            "refusing to overwrite a directory that is not a previous export: "
+            f"{destination}"
+        ) from exc
+    if not isinstance(document, Mapping) or document.get("kind") != "creator_export":
+        raise ValueError(
+            "refusing to overwrite a directory that is not a previous export: "
+            f"{destination}"
+        )
+
+
 def _export_regular_file(source: Path, destination: Path) -> str:
     """Copy one regular project file into the export tree and return its digest."""
     details = os.lstat(source)
     if _is_link_or_reparse(details) or not stat.S_ISREG(details.st_mode):
         raise ProjectConflictError(f"export source is not a regular file: {source.name}")
+    if "\n" in source.name or "\r" in source.name:
+        # checksums.sha256 is one record per line; such a name cannot be written
+        # in a form any verifier could read back.
+        raise ProjectConflictError(
+            "export source name contains a line break and cannot be checksummed"
+        )
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     return sha256_file(destination)
@@ -1820,7 +1882,13 @@ def _export_episode(
         digest = _export_regular_file(source, target / name)
         files.append({"path": name, "sha256": digest})
     media_root = episode_directory / EXPORT_MEDIA_DIRECTORY
-    if include_media and media_root.is_dir() and not media_root.is_symlink():
+    if include_media and media_root.exists():
+        media_details = os.lstat(media_root)
+        if _is_link_or_reparse(media_details) or not stat.S_ISDIR(media_details.st_mode):
+            # Silently exporting no media reads as "this episode has none".
+            raise ProjectConflictError(
+                f"{EXPORT_MEDIA_DIRECTORY} is not a regular directory: {episode_directory.name}"
+            )
         for source in sorted(media_root.rglob("*")):
             if source.is_dir() and not source.is_symlink():
                 continue
@@ -1828,6 +1896,34 @@ def _export_episode(
             digest = _export_regular_file(source, target / relative)
             files.append({"path": relative, "sha256": digest})
     return files, missing
+
+
+def _export_exclusions(root: Path, episodes_name: str) -> list[str]:
+    """Name every top-level project directory this export did not copy.
+
+    A fixed list lies twice over: it names roots a legacy-layout project does
+    not have, and it stays silent about a published 设定集/ that the handover is
+    missing.
+    """
+    excluded: list[str] = []
+    for entry in sorted(root.iterdir(), key=lambda item: item.name):
+        if entry.name == episodes_name or entry.name == PROJECT_FILE:
+            continue
+        if entry.is_dir() or entry.is_symlink():
+            excluded.append(entry.name)
+    return excluded
+
+
+def _is_portable_windows_path(relative: str) -> bool:
+    for part in PurePosixPath(relative).parts:
+        stem = part.split(".")[0].casefold()
+        if stem in WINDOWS_RESERVED_PATH_STEMS:
+            return False
+        if set(part) & WINDOWS_FORBIDDEN_PATH_CHARACTERS:
+            return False
+        if part.endswith((" ", ".")):
+            return False
+    return True
 
 
 def build_creator_export(
@@ -1846,8 +1942,7 @@ def build_creator_export(
     """
     root = find_project(root)
     destination = out.expanduser().resolve()
-    if destination == root or root in destination.parents:
-        raise ValueError("export destination must live outside the project root")
+    _require_safe_export_destination(destination, root)
     layout = _project_layout_from_root(root)
     if layout["mode"] == "mixed":
         raise PackageBlockedError("mixed project layouts cannot be exported")
@@ -1871,8 +1966,10 @@ def build_creator_export(
         selected = available
     if not selected:
         raise FileNotFoundError("no episode directory to export")
-    if destination.exists() and not overwrite:
-        raise FileExistsError(f"export destination already exists: {destination}")
+    if destination.exists():
+        if not overwrite:
+            raise FileExistsError(f"export destination already exists: {destination}")
+        _require_replaceable_export(destination)
 
     project = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1910,11 +2007,17 @@ def build_creator_export(
             "title": project.get("title"),
             "created_at": utc_now(),
             "episodes": exported,
-            "excluded": [
-                CANONICAL_ROOTS["inputs"],
-                CANONICAL_ROOTS["delivery"],
-                ".short-drama",
-            ],
+            "selection": {
+                "episodes": "all" if not episodes else list(selected),
+                "available_episodes": list(available),
+                "include_media": bool(include_media),
+            },
+            "excluded": _export_exclusions(root, episodes_name),
+            "windows_unsafe_paths": sorted(
+                entry["path"]
+                for entry in members
+                if not _is_portable_windows_path(entry["path"])
+            ),
         }
         atomic_json(temporary / "manifest.json", manifest)
         checksum_members = ["manifest.json", *(entry["path"] for entry in members)]
@@ -1932,11 +2035,14 @@ def build_creator_export(
         "out": str(destination),
         "episodes": [entry["episode"] for entry in exported],
         "files": [entry["path"] for entry in members],
+        "excluded": manifest["excluded"],
+        "include_media": bool(include_media),
         "missing_documents": {
             entry["episode"]: entry["missing_documents"]
             for entry in exported
             if entry["missing_documents"]
         },
+        "windows_unsafe_paths": manifest["windows_unsafe_paths"],
     }
 
 

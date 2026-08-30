@@ -7,6 +7,7 @@ import argparse
 import re
 import sys
 from pathlib import Path, PurePosixPath
+from collections.abc import Iterable
 from typing import NamedTuple, Optional
 
 
@@ -34,12 +35,24 @@ REF_RE = re.compile(
     r"（控制：([^；）]+)；不得控制：([^）]+)）",
     re.IGNORECASE,
 )
-LOCK_LINE_RE = re.compile(r"^- *连续性锁：.*$", re.MULTILINE)
+# A declared lock must never become a no-op. Anything that *looks* like a lock
+# line -- any list marker, any leading whitespace -- is captured here and then
+# has to parse, so a creator who indents the bullet under 识别锚点 gets an error
+# instead of silent non-enforcement.
+LOCK_LINE_RE = re.compile(r"^[ \t\u3000]*[-*+][ \t\u3000]*连续性锁[：:].*$", re.MULTILINE)
 LOCK_RE = re.compile(
-    r"^- 连续性锁：(LOCK-[A-Z0-9-]+)《([^》\n]+)》"
+    r"^[ \t\u3000]*[-*+][ \t\u3000]*连续性锁：(LOCK-[A-Z0-9-]+)《([^》\n]+)》"
     r"（镜头：([^；）\n]+)"
     r"(?:；图片提示词项：([^；）\n]+))?）"
     r"· 锁面：(.+)$"
+)
+# The surface has to name what is in the picture. A match glued to a negation
+# ("no pale blue sweater") describes what must be absent, so it cannot be the
+# evidence that the fact is present.
+NEGATION_RE = re.compile(
+    r"(?:^|[\s,;:(\[/—-])(?:no|not|non|never|without|avoid|exclude|excluding|"
+    r"free\s+of|--?no|不要|不得|不能|没有|避免|禁止|无)[\s-]*$",
+    re.IGNORECASE,
 )
 
 
@@ -175,6 +188,57 @@ def _references(value: str, owner: str, project_root: Path, errors: list[str]) -
             errors.append(f"{owner}: REF 控制与不得控制范围冲突: {match.group(1)}")
 
 
+def _excerpt(value: str, limit: int = 60) -> str:
+    """A short, single-line quote of an offending line for a diagnostic."""
+    collapsed = re.sub(r"\s+", " ", value).strip()
+    return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
+
+
+def _unique(values: "Iterable[str]") -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _normalized(value: str) -> str:
+    """Fold case and collapse whitespace so a hard-wrapped prompt still matches.
+
+    A copyable prompt is one rendered paragraph; the line breaks the repo's
+    Markdown style puts in it are not part of the text a creator wrote.
+    """
+    return re.sub(r"\s+", " ", value).strip().casefold()
+
+
+def _carries_surface(prompt: str, surface: str) -> bool:
+    """Is this lock surface actually asserted by this prompt?
+
+    Plain containment is not enough. `chipped white enamel mug` must not be
+    satisfied by `unchipped ... mug`, and `no pale blue sweater` in a negative
+    tail asserts the opposite of the fact the lock exists to hold.
+    """
+    haystack = _normalized(prompt)
+    needle = _normalized(surface)
+    if not needle:
+        return False
+    start = haystack.find(needle)
+    while start != -1:
+        end = start + len(needle)
+        before = haystack[start - 1] if start else ""
+        after = haystack[end] if end < len(haystack) else ""
+        glued = (
+            (needle[:1].isalnum() and (before.isalnum() or before == "-"))
+            or (needle[-1:].isalnum() and (after.isalnum() or after == "-"))
+        )
+        if not glued and NEGATION_RE.search(haystack[:start]) is None:
+            return True
+        start = haystack.find(needle, start + 1)
+    return False
+
+
 class ContinuityLock(NamedTuple):
     """One declared cross-shot lock: the exact surface and where it applies."""
 
@@ -191,7 +255,9 @@ def _continuity_locks(document: str, errors: list[str]) -> list[ContinuityLock]:
     for line in LOCK_LINE_RE.findall(document):
         match = LOCK_RE.match(line)
         if match is None:
-            errors.append("视觉设定.md: 连续性锁必须使用完整语法")
+            errors.append(
+                "视觉设定.md: 连续性锁必须使用完整语法: " + _excerpt(line)
+            )
             continue
         lock_id, label, scope, image_scope, surface = match.groups()
         if lock_id in seen:
@@ -204,7 +270,9 @@ def _continuity_locks(document: str, errors: list[str]) -> list[ContinuityLock]:
         if not surface:
             errors.append(f"{lock_id}: 连续性锁缺少锁面")
             continue
-        shots = [item.strip() for item in re.split(r"[、,，]", _plain(scope)) if item.strip()]
+        shots = _unique(
+            item.strip() for item in re.split(r"[、,，]", _plain(scope)) if item.strip()
+        )
         if not shots:
             errors.append(f"{lock_id}: 连续性锁缺少镜头范围")
             continue
@@ -213,11 +281,11 @@ def _continuity_locks(document: str, errors: list[str]) -> list[ContinuityLock]:
             continue
         images: list[str] = []
         if image_scope is not None and not _is_none(image_scope):
-            images = [
+            images = _unique(
                 item.strip()
                 for item in re.split(r"[、,，]", _plain(image_scope))
                 if item.strip()
-            ]
+            )
             if any(not item.startswith("IMG-") for item in images):
                 errors.append(f"{lock_id}: 连续性锁的图片提示词项必须使用 IMG-  ID")
                 continue
@@ -236,7 +304,7 @@ def _check_continuity_locks(
     """Require every declared lock surface to be present where it was scoped."""
     for lock in locks:
         lock_id = lock.lock_id
-        surface = lock.surface.casefold()
+        surface = lock.surface
         targets = sorted(shots) if lock.shots == ["全集"] else lock.shots
         for shot_id in targets:
             if shot_id not in shots:
@@ -245,20 +313,22 @@ def _check_continuity_locks(
             keyframe = _copyable_prompt(shots[shot_id], heading=r"冻结关键帧提示词")
             if keyframe is None:
                 errors.append(f"{lock_id}: {shot_id} 缺少可读的冻结关键帧提示词")
-            elif surface not in keyframe.casefold():
+            elif not _carries_surface(keyframe, surface):
                 errors.append(f"{lock_id}: {shot_id} 冻结关键帧提示词缺少锁面")
             motion = motion_by_shot.get(shot_id)
             if motion is None:
                 continue
             motion_id, _, copyable_prompt = motion
-            if copyable_prompt is not None and surface not in copyable_prompt.casefold():
+            if copyable_prompt is not None and not _carries_surface(
+                copyable_prompt, surface
+            ):
                 errors.append(f"{lock_id}: {motion_id} 可复制提示词缺少锁面")
         for image_id in lock.images:
             if image_id not in image_prompts:
                 errors.append(f"{lock_id}: 连续性锁指向不存在的 IMG 条目: {image_id}")
                 continue
             image_prompt = image_prompts[image_id]
-            if image_prompt is not None and surface not in image_prompt.casefold():
+            if image_prompt is not None and not _carries_surface(image_prompt, surface):
                 errors.append(f"{lock_id}: {image_id} 可复制提示词缺少锁面")
 
 

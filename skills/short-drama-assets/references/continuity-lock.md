@@ -48,9 +48,18 @@
 - 不写会随镜头变化的词（`in her hands`、`half-finished`、`on the sofa`）；
 - 一个实体一把锁；同一实体的两种造型是两把锁，各写各的生效镜头。
 
-比较时忽略大小写，其余字符逐字比较。提示词可以在锁面前后接语法
-（`she keeps knitting the pale blue chunky knit wool sweater`），但不能改写锁面内部——
-少一个 `stand-collar`、多一个逗号都算漂移。
+比较时忽略大小写，换行按空格处理（可复制正文本来就渲染成一段，硬折行不影响匹配），其余字符
+逐字比较。提示词可以在锁面前后接语法（`she keeps knitting the pale blue chunky knit wool
+sweater`），但不能改写锁面内部——少一个 `stand-collar`、多一个逗号都算漂移。
+
+还有两处刻意不算数，因为它们看起来命中、实际并没有把事实写进画面：
+
+- **粘在词上的匹配不算**。锁面首尾是字母数字时，紧挨着的字母数字或连字符会让它落空：
+  `chipped white enamel mug` 不被 `unchipped white enamel mug` 满足，
+  `pale blue knit` 不被 `pale blue knitwear-print fleece` 满足。锁面要能作为一个完整的词组读出来。
+- **负面提示词里的匹配不算**。写在 `no`、`without`、`不要`、`避免` 之后的锁面说的是「不要出现
+  它」，正好与锁的目的相反；`..., no pale blue chunky knit wool sweater` 不能作为锁面在场的证据。
+  锁面必须出现在描述画面内容的正文里。
 
 ## 语法
 
@@ -64,6 +73,8 @@
 - 连续性锁：LOCK-KNIT《织了一半的毛衣》（镜头：全集；图片提示词项：IMG-PROP-KNIT）· 锁面：pale blue chunky knit wool sweater
 ```
 
+- 列表记号写 `-`、`*` 还是 `+`，缩进几格，都不影响识别；一条看起来像锁却写不完整的行会被
+  报成语法错误，不会被悄悄跳过——锁不能变成空转；
 - `LOCK-...`：本集唯一稳定 ID，与 `IMG-...`、`REF-...`、`SHOT-...` 互不混用；
 - `《中文名》`：给创作者读的名称，必须含中文；
 - `镜头：`：`全集`，或 `、` 分隔的 `SHOT-...` 列表；两者不能混写；
@@ -90,6 +101,8 @@
 - `锁面：a pale blue sweater that she has been knitting since the first scene`——含剧情和时态，
   下一镜必须改写它，锁当场失效；
 - `锁面：high quality, detailed`——不是可辨识事实，锁住了也证明不了一致；
+- 只把锁的 `镜头` 范围写到「文字已经对的那几镜」——范围要按这个事实**实际出现在哪几镜**来写，
+  按已经写对的地方来写，等于把校验器指向没有风险的位置；
 - 把 `镜头：全集` 用在只出现两镜的道具上——其余镜头会被迫写入与本镜无关的名词。
 
 ## 校验

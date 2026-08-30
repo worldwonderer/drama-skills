@@ -545,15 +545,19 @@ class CreatorFirstGoldenTests(unittest.TestCase):
             ),
             "motion drops a locked surface": (
                 "视频提示词.md",
-                "chipped white enamel mug",
-                "chipped enamel mug",
-                "LOCK-MUG: MOTION-EP001-002 可复制提示词缺少锁面",
+                "> A twenty-two-year-old East Asian man with a lean long face, high brow "
+                "ridge, deep-set eyes and short cropped black hair wears buttoned "
+                "olive-green stand-collar service dress",
+                "> A twenty-two-year-old East Asian man with a lean long face, high brow "
+                "ridge, deep-set eyes and short cropped black hair wears a buttoned navy "
+                "mandarin-collar tunic",
+                "LOCK-JIANGCHEN-DRESS: MOTION-EP001-003 可复制提示词缺少锁面",
             ),
             "keyframe drops a locked surface": (
                 "分镜.md",
-                "chipped white enamel mug",
-                "chipped mug",
-                "LOCK-MUG: SHOT-EP001-002 冻结关键帧提示词缺少锁面",
+                "in buttoned olive-green stand-collar service dress",
+                "in a buttoned navy mandarin-collar tunic",
+                "LOCK-JIANGCHEN-DRESS: SHOT-EP001-003 冻结关键帧提示词缺少锁面",
             ),
             "image plate drops a locked surface": (
                 "图片提示词.md",
@@ -561,23 +565,47 @@ class CreatorFirstGoldenTests(unittest.TestCase):
                 "Olive-green service dress",
                 "LOCK-JIANGCHEN-DRESS: IMG-JIANGCHEN-SHEET 可复制提示词缺少锁面",
             ),
-            "malformed continuity lock": (
+            "a locked surface only inside a negative prompt": (
+                "分镜.md",
+                "in buttoned olive-green stand-collar service dress",
+                "in a buttoned navy mandarin-collar tunic, no olive-green stand-collar service dress",
+                "LOCK-JIANGCHEN-DRESS: SHOT-EP001-003 冻结关键帧提示词缺少锁面",
+            ),
+            "a locked surface glued to a prefix": (
+                "分镜.md",
+                "in buttoned olive-green stand-collar service dress",
+                "in a fake-olive-green stand-collar service dress",
+                "LOCK-JIANGCHEN-DRESS: SHOT-EP001-003 冻结关键帧提示词缺少锁面",
+            ),
+            "a locked surface glued to a suffix": (
+                "分镜.md",
+                "olive-green stand-collar service dress, lean long face",
+                "olive-green stand-collar service dressing-gown, lean long face",
+                "LOCK-JIANGCHEN-DRESS: SHOT-EP001-003 冻结关键帧提示词缺少锁面",
+            ),
+            "a star-bulleted continuity lock is not silently dropped": (
                 "视觉设定.md",
-                "- 连续性锁：LOCK-MUG《缺口搪瓷茶缸》（镜头：SHOT-EP001-002）· 锁面：chipped white enamel mug",
-                "- 连续性锁：把茶缸的白色固定住",
+                "- 连续性锁：LOCK-JIANGCHEN-DRESS《江晨橄榄绿立领常服》（镜头：SHOT-EP001-002、SHOT-EP001-003、SHOT-EP001-007；图片提示词项：IMG-JIANGCHEN-SHEET）· 锁面：olive-green stand-collar service dress",
+                "* 连续性锁：把常服固定住",
                 "连续性锁必须使用完整语法",
+            ),
+            "malformed continuity lock names the offending line": (
+                "视觉设定.md",
+                "- 连续性锁：LOCK-JIANGCHEN-DRESS《江晨橄榄绿立领常服》（镜头：SHOT-EP001-002、SHOT-EP001-003、SHOT-EP001-007；图片提示词项：IMG-JIANGCHEN-SHEET）· 锁面：olive-green stand-collar service dress",
+                "- 连续性锁：把常服的立领固定住，别再变了",
+                "连续性锁必须使用完整语法: - 连续性锁：把常服的立领固定住，别再变了",
             ),
             "continuity lock without a surface": (
                 "视觉设定.md",
-                "（镜头：SHOT-EP001-002）· 锁面：chipped white enamel mug",
-                "（镜头：SHOT-EP001-002）· 锁面：",
+                "）· 锁面：olive-green stand-collar service dress",
+                "）· 锁面：",
                 "连续性锁必须使用完整语法",
             ),
             "continuity lock naming an unknown shot": (
                 "视觉设定.md",
-                "（镜头：SHOT-EP001-002）",
-                "（镜头：SHOT-EP001-099）",
-                "LOCK-MUG: 连续性锁指向不存在的镜头: SHOT-EP001-099",
+                "（镜头：SHOT-EP001-002、SHOT-EP001-003、SHOT-EP001-007；",
+                "（镜头：SHOT-EP001-099；",
+                "LOCK-JIANGCHEN-DRESS: 连续性锁指向不存在的镜头: SHOT-EP001-099",
             ),
             "continuity lock naming an unknown image entry": (
                 "视觉设定.md",
@@ -587,15 +615,14 @@ class CreatorFirstGoldenTests(unittest.TestCase):
             ),
             "duplicate continuity lock id": (
                 "视觉设定.md",
-                "- 连续性锁：LOCK-MUG《缺口搪瓷茶缸》（镜头：SHOT-EP001-002）· 锁面：chipped white enamel mug",
-                "- 连续性锁：LOCK-MUG《缺口搪瓷茶缸》（镜头：SHOT-EP001-002）· 锁面：chipped white enamel mug\n"
-                "- 连续性锁：LOCK-MUG《缺口搪瓷茶缸》（镜头：SHOT-EP001-002）· 锁面：white enamel mug",
-                "LOCK-MUG: 连续性锁 ID 重复",
+                "- 连续性锁：LOCK-JIANGCHEN-DRESS《江晨橄榄绿立领常服》（镜头：SHOT-EP001-002、SHOT-EP001-003、SHOT-EP001-007；图片提示词项：IMG-JIANGCHEN-SHEET）· 锁面：olive-green stand-collar service dress",
+                "- 连续性锁：LOCK-JIANGCHEN-DRESS《江晨橄榄绿立领常服》（镜头：SHOT-EP001-002、SHOT-EP001-003、SHOT-EP001-007；图片提示词项：IMG-JIANGCHEN-SHEET）· 锁面：olive-green stand-collar service dress\n- 连续性锁：LOCK-JIANGCHEN-DRESS《江晨橄榄绿立领常服》（镜头：SHOT-EP001-002、SHOT-EP001-003、SHOT-EP001-007；图片提示词项：IMG-JIANGCHEN-SHEET）· 锁面：olive-green stand-collar service dress",
+                "LOCK-JIANGCHEN-DRESS: 连续性锁 ID 重复",
             ),
             "continuity lock mixing 全集 with named shots": (
                 "视觉设定.md",
-                "（镜头：SHOT-EP001-002）",
-                "（镜头：全集、SHOT-EP001-002）",
+                "（镜头：SHOT-EP001-002、SHOT-EP001-003、SHOT-EP001-007；",
+                "（镜头：全集、SHOT-EP001-002；",
                 "不能把全集与具体镜头混写",
             ),
         }
@@ -665,6 +692,72 @@ class CreatorFirstGoldenTests(unittest.TestCase):
                 )
                 errors = creator_markdown_check.validate_episode(episode, project)
                 self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_a_lock_written_with_any_list_marker_still_enforces(self) -> None:
+        """A lock must never become a no-op because of how its bullet is typed.
+
+        Indenting the line under 识别锚点, using a full-width space, or writing
+        `*` instead of `-` all render identically in Markdown; if any of them
+        stopped the lock from being enforced, the drift it exists to catch would
+        come back silently.
+        """
+        declaration = "- 连续性锁：LOCK-JIANGCHEN-DRESS《江晨橄榄绿立领常服》（镜头：SHOT-EP001-002、SHOT-EP001-003、SHOT-EP001-007；图片提示词项：IMG-JIANGCHEN-SHEET）· 锁面：olive-green stand-collar service dress"
+        for label, written in {
+            "indented": "  " + declaration,
+            "full-width space": declaration.replace("- 连续性锁", "-\u3000连续性锁", 1),
+            "star marker": declaration.replace("- ", "* ", 1),
+            "plus marker": declaration.replace("- ", "+ ", 1),
+        }.items():
+            with self.subTest(marker=label), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                episode = project / "剧集/EP001"
+                shutil.copytree(EPISODE, episode)
+                visual = episode / "视觉设定.md"
+                document = visual.read_text(encoding="utf-8")
+                self.assertIn(declaration, document)
+                visual.write_text(
+                    document.replace(declaration, written, 1), encoding="utf-8"
+                )
+                # Written this way it must still pass on the correct episode...
+                self.assertEqual(
+                    creator_markdown_check.validate_episode(episode, project), []
+                )
+                # ...and still catch the drift.
+                storyboard = episode / "分镜.md"
+                storyboard.write_text(
+                    storyboard.read_text(encoding="utf-8").replace(
+                        "in buttoned olive-green stand-collar service dress",
+                        "in a buttoned navy mandarin-collar tunic",
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertIn(
+                    "LOCK-JIANGCHEN-DRESS: SHOT-EP001-003 冻结关键帧提示词缺少锁面",
+                    creator_markdown_check.validate_episode(episode, project),
+                )
+
+    def test_a_locked_surface_survives_a_hard_wrapped_prompt(self) -> None:
+        """The copyable prompt renders as one paragraph; its source line breaks
+        are not part of the text the creator wrote."""
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            episode = project / "剧集/EP001"
+            shutil.copytree(EPISODE, episode)
+            images = episode / "图片提示词.md"
+            document = images.read_text(encoding="utf-8")
+            self.assertIn("Olive-green stand-collar service dress buttoned", document)
+            images.write_text(
+                document.replace(
+                    "Olive-green stand-collar service dress buttoned",
+                    "Olive-green stand-collar\n> service dress buttoned",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                creator_markdown_check.validate_episode(episode, project), []
+            )
 
     def test_continuity_lock_scoped_to_the_whole_episode_covers_every_shot(
         self,

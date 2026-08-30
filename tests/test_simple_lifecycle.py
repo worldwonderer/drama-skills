@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1059,6 +1060,120 @@ class CreatorExportTests(unittest.TestCase):
                 with self.subTest(destination=str(candidate)):
                     with self.assertRaises(ValueError):
                         project_tool.build_creator_export(root, out=candidate)
+
+    def test_export_refuses_a_destination_that_contains_the_project(self) -> None:
+        """The export replaces its destination wholesale, so a destination that
+        contains the project would delete the project it is exporting."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            keepsake = root.parent / "irreplaceable.txt"
+            keepsake.write_text("do not delete\n", encoding="utf-8")
+            for destination in (root.parent, root.parent.parent, root):
+                with self.subTest(destination=str(destination)):
+                    with self.assertRaises(ValueError):
+                        project_tool.build_creator_export(
+                            root, out=destination, overwrite=True
+                        )
+            self.assertTrue(keepsake.is_file())
+            self.assertTrue((root / "short-drama.json").is_file())
+            self.assertTrue((root / "剧集/EP001/剧本.md").is_file())
+
+    def test_export_refuses_a_destination_spelled_as_the_same_directory(self) -> None:
+        """A case-insensitive volume and a differently normalised Unicode name
+        both spell one directory two ways; a resolved-string comparison alone
+        would let either slip past and delete the project."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            alias = Path(directory) / "alias"
+            os.symlink(root, alias, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                project_tool.build_creator_export(root, out=alias, overwrite=True)
+            self.assertTrue((root / "剧集/EP001/剧本.md").is_file())
+
+    def test_export_only_overwrites_a_directory_it_produced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            documents = Path(directory) / "Documents"
+            (documents / "照片").mkdir(parents=True)
+            (documents / "报税.pdf").write_text("tax\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                project_tool.build_creator_export(root, out=documents, overwrite=True)
+            self.assertTrue((documents / "报税.pdf").is_file())
+            self.assertTrue((documents / "照片").is_dir())
+            # A real previous export may still be replaced.
+            handover = Path(directory) / "handover"
+            project_tool.build_creator_export(root, out=handover)
+            project_tool.build_creator_export(root, out=handover, overwrite=True)
+            self.assertTrue((handover / "manifest.json").is_file())
+
+    def test_export_manifest_names_what_it_actually_left_behind(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            (root / "设定集").mkdir(exist_ok=True)
+            (root / "设定集/角色圣经.md").write_text("# 角色圣经\n", encoding="utf-8")
+            out = Path(directory) / "handover"
+            result = project_tool.build_creator_export(root, out=out)
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertIn("设定集", manifest["excluded"])
+            self.assertIn("输入", manifest["excluded"])
+            self.assertEqual(result["excluded"], manifest["excluded"])
+            self.assertEqual(
+                manifest["selection"],
+                {"episodes": "all", "available_episodes": ["EP001"], "include_media": True},
+            )
+
+    def test_export_records_a_partial_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory, episodes=("EP001", "EP002"))
+            out = Path(directory) / "handover"
+            project_tool.build_creator_export(
+                root, out=out, episodes=["EP002"], include_media=False
+            )
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["selection"],
+                {
+                    "episodes": ["EP002"],
+                    "available_episodes": ["EP001", "EP002"],
+                    "include_media": False,
+                },
+            )
+
+    def test_export_fails_closed_on_names_it_cannot_checksum(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            try:
+                (root / "剧集/EP001/制作成果/bad\nname.mp4").write_bytes(b"v")
+            except OSError:
+                self.skipTest("this filesystem rejects newlines in filenames")
+            out = Path(directory) / "handover"
+            with self.assertRaises(project_tool.ProjectConflictError):
+                project_tool.build_creator_export(root, out=out)
+            self.assertFalse(out.exists())
+
+    def test_export_fails_closed_on_a_symlinked_media_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory, episodes=("EP001", "EP002"))
+            media = root / "剧集/EP002/制作成果"
+            shutil.rmtree(media)
+            try:
+                media.symlink_to(root / "剧集/EP001/制作成果", target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("this platform cannot create symlinks")
+            out = Path(directory) / "handover"
+            with self.assertRaises(project_tool.ProjectConflictError):
+                project_tool.build_creator_export(root, out=out)
+            self.assertFalse(out.exists())
+
+    def test_export_reports_names_that_cannot_be_unpacked_on_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            (root / "剧集/EP001/制作成果/con.mp4").write_bytes(b"v")
+            out = Path(directory) / "handover"
+            result = project_tool.build_creator_export(root, out=out)
+            self.assertEqual(
+                result["windows_unsafe_paths"], ["剧集/EP001/制作成果/con.mp4"]
+            )
 
     def test_export_refuses_an_existing_destination_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

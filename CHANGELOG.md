@@ -16,19 +16,35 @@
 ### Added
 
 **`project_tool.py export`**：把每集现有的五份创作文档与 `剧集/<EP>/制作成果/` 复制成一份交付
-目录，附 `manifest.json` 与 `checksums.sha256`，排除 `输入/`、`交付/` 与 `.short-drama/`。
-支持 `--episode`（可重复）、`--no-media` 与 `--overwrite`；`--out` 必须在项目之外。这是**当前
-状态快照**，manifest 的 `asserts_approval` 恒为 `false`，不声称任何审查或创作者接受；带审批证据
-的正式交付包仍然只有 `package` / `verify`。此前创作者跑完全流程后没有可用的导出命令：`package`
-要求每个文件都走过 publish → review → accept，creator-first 项目并不产生这些记录。
+目录，附 `manifest.json` 与 `checksums.sha256`。支持 `--episode`（可重复）、`--no-media` 与
+`--overwrite`。此前创作者跑完全流程后没有可用的导出命令：`package` 要求每个文件都走过
+publish → review → accept，creator-first 项目并不产生这些记录。
+
+这是**当前状态快照**，manifest 的 `asserts_approval` 恒为 `false`，不声称任何审查或创作者接受；
+带审批证据的正式交付包仍然只有 `package` / `verify`。manifest 如实记录本次的选择与遗漏：
+`excluded` 列出本项目里**实际**没有带走的每个根目录（包括已发布的 `设定集/`），`selection` 记录
+是否整集导出、是否带媒体，`missing_documents` 记录哪几集还缺哪份文档。
+
+导出会整体替换目标目录，所以目标的安全性是硬约束：`--out` 不能是项目本身、项目的任何上级目录，
+也不能是同一个目录的另一种拼法（大小写不同或 Unicode 规范化不同的同一目录按 inode 判定）；
+`--overwrite` 只接受一个由本命令生成过的目录（有 `kind: creator_export` 的 manifest），不会
+清空任意路径。无法写进 `checksums.sha256` 的文件名（含换行）、符号链接的文档、剧集目录或
+`制作成果/` 一律 fail closed 且不留半个导出目录；在 Windows 上无法解包的文件名记进
+`windows_unsafe_paths` 提示，但不阻断。
 
 **Dashboard 可以脱离启动它的 shell 常驻**。`dashboard_server.py` 新增 `--detach`、`--status`、
 `--stop` 与 `--restart`。此前服务进程是启动它的 shell 的子进程，会话结束就一起没了，创作者要反复
 重开、每次拿到一个新链接。现在 `--detach` 让它在自己的进程组里运行，运行中的地址、端口与 pid
 记录在 `<workspace>/.short-drama/dashboard.json`（0600），日志在同目录 `dashboard.log`；
 `--status` 重新打印当前链接，`--stop` 停止并清除记录。同一 workspace 已有在跑的实例时，再次启动
-只打印同一个链接，不再开第二个端口。是否在跑由一把服务锁回答，不靠探测端口——Dashboard 仍然
-不含任何对外网络客户端。不加这些参数时行为不变。
+只打印同一个链接，不再开第二个端口；并发启动时也只会有一个服务，其余调用打印同一个链接。
+是否在跑由一把服务锁回答，不靠探测端口——Dashboard 仍然不含任何对外网络客户端。
+
+常驻带来的三个边界一并处理：workspace 目录消失时服务自行退出，不会留下一个还在监听、还在按旧
+链接提供已删除文件的进程；会话记录写不进去（例如只读 workspace）时照常提供服务，只在 stderr
+说明 `--status`/`--stop` 找不到它——提供服务从不依赖这份记录；一份记录只对它自己的 workspace
+生效，共用 `--session-file` 的另一个 workspace 不会拿到指向别人项目的链接。不写这些参数时，
+前台行为与 0.6.1 相同。
 
 **目标模型能力档案**。`$short-drama-video-prompts` 新增一份参考资料，把“按目标模型确认”落成六条
 有限的能力轴：单次原生时长、参考条件方式、声音是否与画面同轨生成、画幅与分辨率、正文长度上限、
@@ -51,9 +67,14 @@
 ```
 
 生效范围内的冻结关键帧、`MOTION-...` 正文和被点名的 `IMG-...` 正文都必须含有这段锁面，
-`creator_markdown_check.py` 会机械核对（忽略大小写）。此前只有给创作者读的「识别锚点」，执行端
-读不到它：视觉设定写了毛衣是浅蓝色，第一镜生成蓝色、第二镜生成红色，而每一条提示词单看都成立，
-所以文字审查抓不到。图生视频“参考帧已经交代过就删掉重复描述”是常规做法，锁面是它写明的例外。
+`creator_markdown_check.py` 会机械核对。此前只有给创作者读的「识别锚点」，执行端读不到它：
+视觉设定写了毛衣是浅蓝色，第一镜生成蓝色、第二镜生成红色，而每一条提示词单看都成立，所以文字
+审查抓不到。图生视频“参考帧已经交代过就删掉重复描述”是常规做法，锁面是它写明的例外。
+
+核对规则按「这条提示词是否真的把这个事实写进了画面」来定：忽略大小写，硬折行按空格处理；粘在
+词上的匹配不算（`chipped white enamel mug` 不被 `unchipped white enamel mug` 满足）；写在
+`no`/`without`/`不要`/`避免` 之后的匹配不算，那说的是不要出现它。列表记号与缩进不影响识别，
+而一条看起来像锁却写不完整的行会被报成语法错误并指出原文，不会被悄悄跳过——锁不能变成空转。
 
 写法、什么值得上锁与反例见
 [跨镜一致性锁](skills/short-drama-assets/references/continuity-lock.md)。

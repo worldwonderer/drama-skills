@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 import webbrowser
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -1394,9 +1394,19 @@ def _try_exclusive_lock(handle: Any) -> bool:
     return True
 
 
+class SessionUnavailable(RuntimeError):
+    """This location cannot hold a session record (read-only workspace, ...).
+
+    Serving does not depend on the record: it exists so --detach can report a
+    URL and --status/--stop can find the server later. A workspace the creator
+    can read but not write must still open, the way it did before sessions
+    existed.
+    """
+
+
 @contextlib.contextmanager
-def hold_session_lock(session_path: Path) -> Iterator[Any | None]:
-    """Hold the serving lock for one dashboard, or yield ``None`` if taken.
+def hold_session_lock(session_path: Path) -> Iterator[bool]:
+    """Hold the serving lock, yielding whether WE hold it (vs. another process).
 
     Liveness is answered by this lock rather than by probing the recorded port.
     A PID can be reused and a port can be inherited by something unrelated; a
@@ -1404,22 +1414,71 @@ def hold_session_lock(session_path: Path) -> Iterator[Any | None]:
     also keeps the dashboard free of any outbound network client.
     """
     lock_path = session_lock_path(session_path)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = lock_path.open("a+b")
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = lock_path.open("a+b")
+    except OSError as exc:
+        raise SessionUnavailable(
+            f"cannot use a dashboard session file at {lock_path}: {exc}"
+        ) from exc
     if not _try_exclusive_lock(handle):
         handle.close()
-        yield None
+        yield False
         return
     try:
-        yield handle
+        yield True
     finally:
         handle.close()
 
 
 def session_is_live(session_path: Path) -> bool:
     """Answer whether a dashboard is still serving this workspace."""
-    with hold_session_lock(session_path) as handle:
-        return handle is None
+    try:
+        with hold_session_lock(session_path) as held:
+            return not held
+    except SessionUnavailable:
+        return False
+
+
+def session_matches(session: Mapping[str, Any], workspace: Path) -> bool:
+    """Is this record about the workspace the caller asked for?
+
+    A --session-file shared between two workspaces would otherwise hand the
+    second creator a link that serves the first one's project.
+    """
+    return session.get("fingerprint") == workspace_fingerprint(workspace)
+
+
+def watch_workspace(server: Any, workspace: Path, interval: float = 5.0) -> None:
+    """Shut the server down if its workspace stops existing.
+
+    A detached dashboard used to die with its shell. Now that it does not, a
+    creator who deletes or moves the project would otherwise leave a server
+    holding a port and answering on the old token URL for a tree that is gone --
+    and its session record went with the directory, so nothing could stop it.
+    """
+    try:
+        expected = os.stat(workspace)
+    except OSError:
+        return
+    identity = (expected.st_dev, expected.st_ino)
+    misses = 0
+
+    def loop() -> None:
+        nonlocal misses
+        while True:
+            time.sleep(interval)
+            try:
+                current = os.stat(workspace)
+                gone = (current.st_dev, current.st_ino) != identity
+            except OSError:
+                gone = True
+            misses = misses + 1 if gone else 0
+            if misses >= 2:  # tolerate one transient stat failure
+                threading.Thread(target=server.shutdown, daemon=True).start()
+                return
+
+    threading.Thread(target=loop, daemon=True).start()
 
 
 def stop_session(path: Path) -> bool:
@@ -1575,20 +1634,30 @@ def main(argv: list[str] | None = None) -> int:
 
     workspace = args.workspace.expanduser().resolve()
     session_path = session_file_for(workspace, args.session_file)
+    if not (args.status or args.stop) and not workspace.is_dir():
+        # Creating a mistyped --workspace and serving it as an empty dashboard
+        # leaves a long-lived server for a directory that never existed.
+        print(f"workspace is not an existing directory: {workspace}", file=sys.stderr)
+        return 2
 
     if args.status:
         session = read_session(session_path)
-        live = session is not None and session_is_live(session_path)
+        holding = session is not None and session_is_live(session_path)
+        mine = holding and session is not None and session_matches(session, workspace)
         status: dict[str, Any] = {
-            "running": live,
+            "running": bool(mine),
             "workspace": str(workspace),
             "session_file": str(session_path),
         }
-        if live and session is not None:
+        if holding and session is not None:
             status["url"] = session["url"]
             status["pid"] = session["pid"]
+            recorded = session.get("workspace")
+            if not mine:
+                # The record is live but describes a different workspace.
+                status["serves_workspace"] = recorded
         print(json.dumps(status, ensure_ascii=False, sort_keys=True), flush=True)
-        return 0 if live else 1
+        return 0 if mine else 1
 
     if args.stop:
         stopped = stop_session(session_path)
@@ -1596,7 +1665,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     existing = read_session(session_path)
-    if existing is not None and session_is_live(session_path):
+    if (
+        existing is not None
+        and session_matches(existing, workspace)
+        and session_is_live(session_path)
+    ):
         if args.restart:
             stop_session(session_path)
         else:
@@ -1612,9 +1685,30 @@ def main(argv: list[str] | None = None) -> int:
             session = start_detached(
                 workspace, host=args.host, port=args.port, session_path=session_path
             )
+        except SessionUnavailable as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 2
         except RuntimeError as exc:
-            # Losing the race to another start lands here too: that process took
-            # the serving lock and this child exited without recording anything.
+            # Losing the race to another start lands here: the winner took the
+            # serving lock and this child exited without recording anything.
+            # A dashboard IS serving this workspace, so report its URL.
+            winner = read_session(session_path)
+            live = winner is not None and session_is_live(session_path)
+            if live and winner is not None and session_matches(winner, workspace):
+                url = str(winner["url"])
+                print(f"Dashboard: {url}", flush=True)
+                print("Reusing the dashboard already serving this workspace", flush=True)
+                if args.open:
+                    webbrowser.open(url)
+                return 0
+            if live and winner is not None:
+                print(
+                    f"{session_path} already records a dashboard serving "
+                    f"{winner.get('workspace')}; give this workspace its own "
+                    "--session-file",
+                    file=sys.stderr,
+                )
+                return 1
             print(str(exc), file=sys.stderr)
             return 1
         url = str(session["url"])
@@ -1624,10 +1718,22 @@ def main(argv: list[str] | None = None) -> int:
             webbrowser.open(url)
         return 0
 
-    with hold_session_lock(session_path) as lock:
-        if lock is None:
+    with contextlib.ExitStack() as stack:
+        try:
+            held = stack.enter_context(hold_session_lock(session_path))
+            recordable = True
+        except SessionUnavailable as exc:
+            # A read-only workspace still opens. The record is what --detach and
+            # --status need; serving never depended on it.
+            print(f"{exc}", file=sys.stderr)
+            print(
+                "serving without a session record; --status and --stop cannot find it",
+                file=sys.stderr,
+            )
+            held, recordable = True, False
+        if not held:
             reused = read_session(session_path)
-            if reused is not None:
+            if reused is not None and session_matches(reused, workspace):
                 print(f"Dashboard: {reused['url']}", flush=True)
                 print("Reusing the dashboard already serving this workspace", flush=True)
                 return 0
@@ -1642,20 +1748,25 @@ def main(argv: list[str] | None = None) -> int:
         display_host = f"[{host}]" if ":" in host else host
         scheme = "http"
         url = f"{scheme}://{display_host}:{port}/#{server.access_token}"
-        write_session(
-            session_path,
-            {
-                "schema_version": SESSION_SCHEMA,
-                "workspace": str(workspace),
-                "fingerprint": server.workspace_fingerprint,
-                "host": host,
-                "port": port,
-                "pid": os.getpid(),
-                "token": server.access_token,
-                "url": url,
-                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            },
-        )
+        if recordable:
+            try:
+                write_session(
+                    session_path,
+                    {
+                        "schema_version": SESSION_SCHEMA,
+                        "workspace": str(workspace),
+                        "fingerprint": server.workspace_fingerprint,
+                        "host": host,
+                        "port": port,
+                        "pid": os.getpid(),
+                        "token": server.access_token,
+                        "url": url,
+                        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    },
+                )
+            except OSError as exc:
+                print(f"cannot write the session record: {exc}", file=sys.stderr)
+                recordable = False
         # A detached server is stopped with SIGTERM. Handle it so the recorded
         # session is removed instead of being left behind. `shutdown` blocks
         # until `serve_forever` returns, so it cannot run on the thread that is
@@ -1665,6 +1776,7 @@ def main(argv: list[str] | None = None) -> int:
                 signal.SIGTERM,
                 lambda *_: threading.Thread(target=server.shutdown, daemon=True).start(),
             )
+        watch_workspace(server, workspace)
         print(f"Dashboard: {url}", flush=True)
         if args.open:
             webbrowser.open(url)
@@ -1674,10 +1786,11 @@ def main(argv: list[str] | None = None) -> int:
             pass
         finally:
             server.server_close()
-            current = read_session(session_path)
-            if current is not None and current.get("pid") == os.getpid():
-                with contextlib.suppress(OSError):
-                    session_path.unlink()
+            if recordable:
+                current = read_session(session_path)
+                if current is not None and current.get("pid") == os.getpid():
+                    with contextlib.suppress(OSError):
+                        session_path.unlink()
     return 0
 
 
