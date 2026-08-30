@@ -95,7 +95,7 @@
 ## 校验
 
 ```bash
-python3 skills/short-drama/scripts/creator_markdown_check.py 剧集/<EP> --project-root .
+python3 <core 技能目录>/scripts/creator_markdown_check.py 剧集/<EP> --project-root .
 ```
 
 它只机械核对语法、范围可解析，以及锁面是否真的出现在被点名的正文里。该不该上这把锁、锁面写得

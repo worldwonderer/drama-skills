@@ -1376,8 +1376,12 @@ def _try_exclusive_lock(handle: Any) -> bool:
             handle.write(b"0")
             handle.flush()
         handle.seek(0)
+        # Reached through getattr for the same reason project_tool.py does: the
+        # POSIX stubs mypy checks against do not declare these Windows names.
+        locking = getattr(msvcrt, "locking")
+        non_blocking = getattr(msvcrt, "LK_NBLCK")
         try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            locking(handle.fileno(), non_blocking, 1)
         except OSError:
             return False
         return True
@@ -1575,19 +1579,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.status:
         session = read_session(session_path)
         live = session is not None and session_is_live(session_path)
-        print(
-            json.dumps(
-                {
-                    "running": live,
-                    "workspace": str(workspace),
-                    "session_file": str(session_path),
-                    **({"url": session["url"], "pid": session["pid"]} if live else {}),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
-            flush=True,
-        )
+        status: dict[str, Any] = {
+            "running": live,
+            "workspace": str(workspace),
+            "session_file": str(session_path),
+        }
+        if live and session is not None:
+            status["url"] = session["url"]
+            status["pid"] = session["pid"]
+        print(json.dumps(status, ensure_ascii=False, sort_keys=True), flush=True)
         return 0 if live else 1
 
     if args.stop:
@@ -1608,9 +1608,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     if args.detach:
-        session = start_detached(
-            workspace, host=args.host, port=args.port, session_path=session_path
-        )
+        try:
+            session = start_detached(
+                workspace, host=args.host, port=args.port, session_path=session_path
+            )
+        except RuntimeError as exc:
+            # Losing the race to another start lands here too: that process took
+            # the serving lock and this child exited without recording anything.
+            print(str(exc), file=sys.stderr)
+            return 1
         url = str(session["url"])
         print(f"Dashboard: {url}", flush=True)
         print(f"Serving in the background as pid {session['pid']}", flush=True)

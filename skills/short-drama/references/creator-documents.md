@@ -132,4 +132,4 @@
 - 提示词正文必须可直接复制，不放占位符、流程备注或 QA 结论。
 - 引用使用文档里看得见的场景/镜头/提示词 ID；不写文件哈希和内部路径。
 - 用户没要求的字段不为“完整”而补造。
-- 完成或修订五份文档后运行 `python3 skills/short-drama/scripts/creator_markdown_check.py 剧集/<EP> --project-root .`，校验可执行的跨文档结构；内容质量仍由创作者审查。
+- 完成或修订五份文档后运行 `python3 {技能目录}/scripts/creator_markdown_check.py 剧集/<EP> --project-root .`，校验可执行的跨文档结构；内容质量仍由创作者审查。

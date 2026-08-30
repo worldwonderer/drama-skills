@@ -7,7 +7,7 @@ import argparse
 import re
 import sys
 from pathlib import Path, PurePosixPath
-from typing import Optional
+from typing import NamedTuple, Optional
 
 
 MINIMUM_PYTHON = (3, 9)
@@ -175,9 +175,18 @@ def _references(value: str, owner: str, project_root: Path, errors: list[str]) -
             errors.append(f"{owner}: REF 控制与不得控制范围冲突: {match.group(1)}")
 
 
-def _continuity_locks(document: str, errors: list[str]) -> list[dict[str, object]]:
+class ContinuityLock(NamedTuple):
+    """One declared cross-shot lock: the exact surface and where it applies."""
+
+    lock_id: str
+    surface: str
+    shots: list[str]
+    images: list[str]
+
+
+def _continuity_locks(document: str, errors: list[str]) -> list[ContinuityLock]:
     """Parse the declared continuity locks of one 视觉设定.md."""
-    locks: list[dict[str, object]] = []
+    locks: list[ContinuityLock] = []
     seen: set[str] = set()
     for line in LOCK_LINE_RE.findall(document):
         match = LOCK_RE.match(line)
@@ -212,14 +221,12 @@ def _continuity_locks(document: str, errors: list[str]) -> list[dict[str, object
             if any(not item.startswith("IMG-") for item in images):
                 errors.append(f"{lock_id}: 连续性锁的图片提示词项必须使用 IMG-  ID")
                 continue
-        locks.append(
-            {"id": lock_id, "surface": surface, "shots": shots, "images": images}
-        )
+        locks.append(ContinuityLock(lock_id, surface, shots, images))
     return locks
 
 
 def _check_continuity_locks(
-    locks: list[dict[str, object]],
+    locks: list[ContinuityLock],
     *,
     shots: dict[str, str],
     motion_by_shot: dict[str, tuple[str, str, Optional[str]]],
@@ -228,10 +235,9 @@ def _check_continuity_locks(
 ) -> None:
     """Require every declared lock surface to be present where it was scoped."""
     for lock in locks:
-        lock_id = str(lock["id"])
-        surface = str(lock["surface"]).casefold()
-        scoped = list(lock["shots"])  # type: ignore[arg-type]
-        targets = sorted(shots) if scoped == ["全集"] else scoped
+        lock_id = lock.lock_id
+        surface = lock.surface.casefold()
+        targets = sorted(shots) if lock.shots == ["全集"] else lock.shots
         for shot_id in targets:
             if shot_id not in shots:
                 errors.append(f"{lock_id}: 连续性锁指向不存在的镜头: {shot_id}")
@@ -247,7 +253,7 @@ def _check_continuity_locks(
             motion_id, _, copyable_prompt = motion
             if copyable_prompt is not None and surface not in copyable_prompt.casefold():
                 errors.append(f"{lock_id}: {motion_id} 可复制提示词缺少锁面")
-        for image_id in lock["images"]:  # type: ignore[union-attr]
+        for image_id in lock.images:
             if image_id not in image_prompts:
                 errors.append(f"{lock_id}: 连续性锁指向不存在的 IMG 条目: {image_id}")
                 continue

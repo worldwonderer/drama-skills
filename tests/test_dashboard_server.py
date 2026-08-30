@@ -1160,6 +1160,22 @@ class DashboardSessionTests(unittest.TestCase):
             self.assertFalse(session_path.exists())
             self.assertFalse(dashboard_server.session_is_live(session_path))
 
+    def test_a_detached_start_that_never_records_a_session_reports_the_log(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = self.make_workspace(directory)
+            session_path = workspace / ".short-drama/dashboard.json"
+            # Hold the serving lock so the spawned child exits without recording.
+            with dashboard_server.hold_session_lock(session_path) as held:
+                self.assertIsNotNone(held)
+                started = self.run_dashboard(
+                    "--workspace", str(workspace), "--port", "0", "--detach"
+                )
+            self.assertEqual(started.returncode, 1)
+            self.assertIn("dashboard.log", started.stderr)
+            self.assertNotIn("Traceback", started.stderr)
+
     def test_status_reports_nothing_running_without_a_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = self.make_workspace(directory)
