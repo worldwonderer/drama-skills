@@ -943,6 +943,186 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class CreatorExportTests(unittest.TestCase):
+    DOCUMENTS = (
+        "剧本.md",
+        "视觉设定.md",
+        "分镜.md",
+        "图片提示词.md",
+        "视频提示词.md",
+    )
+
+    def make_project(self, directory: str, *, episodes: tuple[str, ...] = ("EP001",)) -> Path:
+        root = Path(directory) / "project"
+        project_tool.initialize_project(
+            root,
+            title="导出验证",
+            language="zh-CN",
+            aspect_ratio="9:16",
+            suite_root=SKILL,
+        )
+        for episode in episodes:
+            episode_root = root / "剧集" / episode
+            episode_root.mkdir(parents=True)
+            for name in self.DOCUMENTS:
+                (episode_root / name).write_text(f"# {episode} {name}\n", encoding="utf-8")
+            media = episode_root / "制作成果"
+            media.mkdir()
+            (media / f"SHOT-{episode}-001.mp4").write_bytes(b"rendered bytes")
+        inputs = root / "输入"
+        inputs.mkdir(exist_ok=True)
+        (inputs / "私有素材.txt").write_text("private source\n", encoding="utf-8")
+        return root
+
+    def test_export_copies_current_documents_and_produced_media(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory, episodes=("EP001", "EP002"))
+            out = Path(directory) / "handover"
+            result = project_tool.build_creator_export(root, out=out)
+            self.assertEqual(result["episodes"], ["EP001", "EP002"])
+            self.assertEqual(result["missing_documents"], {})
+            for episode in ("EP001", "EP002"):
+                for name in self.DOCUMENTS:
+                    self.assertTrue((out / "剧集" / episode / name).is_file())
+                self.assertTrue(
+                    (out / "剧集" / episode / "制作成果" / f"SHOT-{episode}-001.mp4").is_file()
+                )
+            self.assertTrue((out / "short-drama.json").is_file())
+
+    def test_export_leaves_private_inputs_and_operational_state_behind(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            out = Path(directory) / "handover"
+            project_tool.build_creator_export(root, out=out)
+            copied = {path.relative_to(out).as_posix() for path in out.rglob("*") if path.is_file()}
+            self.assertFalse(any(name.startswith("输入/") for name in copied), copied)
+            self.assertFalse(any(".short-drama" in name for name in copied), copied)
+
+    def test_export_manifest_does_not_assert_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            out = Path(directory) / "handover"
+            project_tool.build_creator_export(root, out=out)
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["kind"], "creator_export")
+            self.assertFalse(manifest["asserts_approval"])
+            self.assertEqual(
+                manifest["project_id"],
+                json.loads((root / "short-drama.json").read_text(encoding="utf-8"))["project_id"],
+            )
+
+    def test_export_checksums_cover_every_exported_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            out = Path(directory) / "handover"
+            project_tool.build_creator_export(root, out=out)
+            recorded = {}
+            for line in (out / "checksums.sha256").read_text(encoding="utf-8").splitlines():
+                digest, relative = line.split("  ", 1)
+                recorded[relative] = digest
+            present = {
+                path.relative_to(out).as_posix()
+                for path in out.rglob("*")
+                if path.is_file() and path.name != "checksums.sha256"
+            }
+            self.assertEqual(set(recorded), present)
+            for relative, digest in recorded.items():
+                self.assertEqual(
+                    hashlib.sha256((out / relative).read_bytes()).hexdigest(), digest
+                )
+
+    def test_export_can_select_one_episode_and_skip_media(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory, episodes=("EP001", "EP002"))
+            out = Path(directory) / "handover"
+            result = project_tool.build_creator_export(
+                root, out=out, episodes=["EP002"], include_media=False
+            )
+            self.assertEqual(result["episodes"], ["EP002"])
+            self.assertFalse((out / "剧集/EP001").exists())
+            self.assertFalse((out / "剧集/EP002/制作成果").exists())
+            self.assertTrue((out / "剧集/EP002/剧本.md").is_file())
+
+    def test_export_reports_documents_the_project_has_not_written_yet(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            (root / "剧集/EP001/视频提示词.md").unlink()
+            out = Path(directory) / "handover"
+            result = project_tool.build_creator_export(root, out=out)
+            self.assertEqual(result["missing_documents"], {"EP001": ["视频提示词.md"]})
+            self.assertFalse((out / "剧集/EP001/视频提示词.md").exists())
+
+    def test_export_refuses_a_destination_inside_the_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            for candidate in (root, root / "交付/handover"):
+                with self.subTest(destination=str(candidate)):
+                    with self.assertRaises(ValueError):
+                        project_tool.build_creator_export(root, out=candidate)
+
+    def test_export_refuses_an_existing_destination_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            out = Path(directory) / "handover"
+            project_tool.build_creator_export(root, out=out)
+            with self.assertRaises(FileExistsError):
+                project_tool.build_creator_export(root, out=out)
+            (out / "剧集/EP001/剧本.md").write_text("# 已改\n", encoding="utf-8")
+            project_tool.build_creator_export(root, out=out, overwrite=True)
+            self.assertEqual(
+                (out / "剧集/EP001/剧本.md").read_text(encoding="utf-8"),
+                "# EP001 剧本.md\n",
+            )
+
+    def test_export_rejects_unknown_or_malformed_episode_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            out = Path(directory) / "handover"
+            with self.assertRaises(FileNotFoundError):
+                project_tool.build_creator_export(root, out=out, episodes=["EP404"])
+            with self.assertRaises(ValueError):
+                project_tool.build_creator_export(root, out=out, episodes=["第一集"])
+
+    def test_export_fails_closed_on_a_symlinked_document(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            secret = Path(directory) / "outside.md"
+            secret.write_text("outside the project\n", encoding="utf-8")
+            document = root / "剧集/EP001/剧本.md"
+            document.unlink()
+            try:
+                document.symlink_to(secret)
+            except (OSError, NotImplementedError):
+                self.skipTest("this platform cannot create symlinks")
+            out = Path(directory) / "handover"
+            with self.assertRaises(project_tool.ProjectConflictError):
+                project_tool.build_creator_export(root, out=out)
+            self.assertFalse(out.exists())
+
+    def test_export_command_line_prints_the_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.make_project(directory)
+            out = Path(directory) / "handover"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(SCRIPT),
+                    "export",
+                    str(root),
+                    "--out",
+                    str(out),
+                ],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertEqual(payload["kind"], "creator_export")
+            self.assertEqual(payload["episodes"], ["EP001"])
+
+
 class AcceptedBytesAreTheAcceptedBytesTests(unittest.TestCase):
     """Editing an accepted artifact behind the tool's back must un-accept it.
 

@@ -34,6 +34,7 @@
 | VID-20 | reviewed_invariant | Packing routes change delivery granularity only, leaving shot boundaries, shot purpose, and per-shot reviewability intact. A single long-form generation carrying several accepted shots *is* a multi-shot container and is billed under VID-13 and VID-15; it introduces no separate accounting and no exemption from the contiguity, binding-chain, and scene-boundary constraints. A continuation route instead starts from a previously generated result, which is observation evidence and not an accepted artifact: the accepted shot start boundary stays the sole authority, and any claim about the observed state binds a production observation record or remains `unverified`. |
 | VID-21 | craft_default | When the project's accepted production profile has generated imagery carry the frame, actions are written as high-frequency, whole-body or single-limb movements common in everyday footage; precise interception, invisible internal states, negative actions, and three-or-more-step two-handed choreography are rewritten into equivalent common-action combinations, with the dramatic information carried by combination and timing. The rule is inactive for live action or an undeclared profile, and a rewrite may never change accepted shot boundaries, terminal states, or screenplay fact. |
 | VID-22 | reviewed_invariant | Copyable text carries only what will be filmed. IDs, workflow status, hashes, file paths and craft notes stay outside the prompt; negative intent is rewritten as a visible positive state. A prompt that only recites constraints renders as nothing. |
+| VID-23 | reviewed_invariant | When the target model is declared to generate audio in the same pass, the copyable body states the sound this shot needs and the sound it must not produce; an unstated channel is filled by the execution end, not silenced. |
 
 ### `CON`
 
@@ -45,6 +46,7 @@
 | CON-04 | structural_invariant | A continuity change states before, after, cause/source scene, effective range, and affected visible IDs. |
 | CON-05 | taste_option | Declared montage, ellipsis, dream, or subjective imagery may intentionally break ordinary continuity. |
 | CON-06 | structural_invariant | A continuity change names every existing downstream document it affects; future work is described, not pre-created. |
+| CON-07 | structural_invariant | A continuity lock declared in `视觉设定.md` fixes one verbatim surface plus its shot and image scope; every in-scope frozen keyframe, motion prompt, and named image prompt carries that surface unchanged. |
 
 规则分级由高到低：`structural_invariant`（结构缺陷，阻断）、
 `reviewed_invariant`（需证据判断）、`craft_default`（常用做法，可覆盖）、

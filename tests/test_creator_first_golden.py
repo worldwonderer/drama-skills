@@ -60,6 +60,7 @@ EXPECTED_KNOWHOW = {
         "asset-review-checklist.md",
         "character-and-look.md",
         "continuity-delta.md",
+        "continuity-lock.md",
         "identity-vs-variant.md",
         "location-and-view.md",
         "occurrence-extraction.md",
@@ -101,6 +102,7 @@ EXPECTED_KNOWHOW = {
         "production-prompt-grammar.md",
         "review-and-fixtures.md",
         "stage-contract.md",
+        "target-model-profile.md",
     },
     "short-drama-review": {
         "anti-template-repair.md",
@@ -541,6 +543,61 @@ class CreatorFirstGoldenTests(unittest.TestCase):
                 "《人物参考》（控制：身份；不得控制：动作）",
                 "完整 REF 语法",
             ),
+            "motion drops a locked surface": (
+                "视频提示词.md",
+                "chipped white enamel mug",
+                "chipped enamel mug",
+                "LOCK-MUG: MOTION-EP001-002 可复制提示词缺少锁面",
+            ),
+            "keyframe drops a locked surface": (
+                "分镜.md",
+                "chipped white enamel mug",
+                "chipped mug",
+                "LOCK-MUG: SHOT-EP001-002 冻结关键帧提示词缺少锁面",
+            ),
+            "image plate drops a locked surface": (
+                "图片提示词.md",
+                "Olive-green stand-collar service dress",
+                "Olive-green service dress",
+                "LOCK-JIANGCHEN-DRESS: IMG-JIANGCHEN-SHEET 可复制提示词缺少锁面",
+            ),
+            "malformed continuity lock": (
+                "视觉设定.md",
+                "- 连续性锁：LOCK-MUG《缺口搪瓷茶缸》（镜头：SHOT-EP001-002）· 锁面：chipped white enamel mug",
+                "- 连续性锁：把茶缸的白色固定住",
+                "连续性锁必须使用完整语法",
+            ),
+            "continuity lock without a surface": (
+                "视觉设定.md",
+                "（镜头：SHOT-EP001-002）· 锁面：chipped white enamel mug",
+                "（镜头：SHOT-EP001-002）· 锁面：",
+                "连续性锁必须使用完整语法",
+            ),
+            "continuity lock naming an unknown shot": (
+                "视觉设定.md",
+                "（镜头：SHOT-EP001-002）",
+                "（镜头：SHOT-EP001-099）",
+                "LOCK-MUG: 连续性锁指向不存在的镜头: SHOT-EP001-099",
+            ),
+            "continuity lock naming an unknown image entry": (
+                "视觉设定.md",
+                "图片提示词项：IMG-JIANGCHEN-SHEET",
+                "图片提示词项：IMG-NOT-DEFINED",
+                "连续性锁指向不存在的 IMG 条目: IMG-NOT-DEFINED",
+            ),
+            "duplicate continuity lock id": (
+                "视觉设定.md",
+                "- 连续性锁：LOCK-MUG《缺口搪瓷茶缸》（镜头：SHOT-EP001-002）· 锁面：chipped white enamel mug",
+                "- 连续性锁：LOCK-MUG《缺口搪瓷茶缸》（镜头：SHOT-EP001-002）· 锁面：chipped white enamel mug\n"
+                "- 连续性锁：LOCK-MUG《缺口搪瓷茶缸》（镜头：SHOT-EP001-002）· 锁面：white enamel mug",
+                "LOCK-MUG: 连续性锁 ID 重复",
+            ),
+            "continuity lock mixing 全集 with named shots": (
+                "视觉设定.md",
+                "（镜头：SHOT-EP001-002）",
+                "（镜头：全集、SHOT-EP001-002）",
+                "不能把全集与具体镜头混写",
+            ),
         }
         for label, (name, old, new, expected) in mutations.items():
             with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
@@ -609,6 +666,57 @@ class CreatorFirstGoldenTests(unittest.TestCase):
                 errors = creator_markdown_check.validate_episode(episode, project)
                 self.assertTrue(any(expected in error for error in errors), errors)
 
+    def test_continuity_lock_scoped_to_the_whole_episode_covers_every_shot(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            episode = project / "剧集/EP001"
+            shutil.copytree(EPISODE, episode)
+            visual = episode / "视觉设定.md"
+            visual.write_text(
+                visual.read_text(encoding="utf-8")
+                + "\n- 连续性锁：LOCK-ABSENT《不存在的锁面》（镜头：全集）"
+                "· 锁面：a surface no prompt in this episode contains\n",
+                encoding="utf-8",
+            )
+            errors = creator_markdown_check.validate_episode(episode, project)
+            shots = heading_ids(text("分镜.md"), "SHOT-")
+            self.assertEqual(
+                sorted(
+                    error
+                    for error in errors
+                    if "冻结关键帧提示词缺少锁面" in error
+                ),
+                sorted(
+                    f"LOCK-ABSENT: {shot_id} 冻结关键帧提示词缺少锁面"
+                    for shot_id in shots
+                ),
+            )
+            self.assertEqual(
+                len([error for error in errors if "可复制提示词缺少锁面" in error]),
+                len(shots),
+            )
+
+    def test_continuity_locks_are_optional(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            episode = project / "剧集/EP001"
+            shutil.copytree(EPISODE, episode)
+            visual = episode / "视觉设定.md"
+            visual.write_text(
+                "\n".join(
+                    line
+                    for line in visual.read_text(encoding="utf-8").splitlines()
+                    if "连续性锁" not in line
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                creator_markdown_check.validate_episode(episode, project), []
+            )
+
     def test_frozen_keyframes_are_copyable_markdown_blocks(self) -> None:
         storyboard = text("分镜.md")
         for shot_id in heading_ids(storyboard, "SHOT-"):
@@ -664,18 +772,18 @@ class CreatorFirstGoldenTests(unittest.TestCase):
             "short-drama-write": {*(f"SCR-{number:02d}" for number in range(1, 18))},
             "short-drama-assets": {
                 *(f"AST-{number:02d}" for number in range(1, 13)),
-                *(f"CON-{number:02d}" for number in range(1, 7)),
+                *(f"CON-{number:02d}" for number in range(1, 8)),
             },
             "short-drama-image-prompts": {
-                *(f"IMG-{number:02d}" for number in range(1, 13))
+                *(f"IMG-{number:02d}" for number in range(1, 14))
             },
             "short-drama-storyboard": {
                 *(f"SHT-{number:02d}" for number in range(1, 22)),
-                *(f"CON-{number:02d}" for number in range(1, 7)),
+                *(f"CON-{number:02d}" for number in range(1, 8)),
             },
             "short-drama-video-prompts": {
-                *(f"VID-{number:02d}" for number in range(1, 23)),
-                *(f"CON-{number:02d}" for number in range(1, 7)),
+                *(f"VID-{number:02d}" for number in range(1, 24)),
+                *(f"CON-{number:02d}" for number in range(1, 8)),
             },
             "short-drama-review": {*(f"REV-{number:02d}" for number in range(1, 12))},
         }

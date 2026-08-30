@@ -20,7 +20,7 @@ import stat
 import sys
 import unicodedata
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
@@ -40,6 +40,15 @@ STATE_SCHEMA = "2.0"
 DEFAULT_PROMPT_LANGUAGE = "en"
 LANGUAGE_TAG_RE = re.compile(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*")
 DELIVERY_SUFFIXES = {".md", ".json", ".jsonl"}
+CREATOR_DOCUMENTS = (
+    "剧本.md",
+    "视觉设定.md",
+    "分镜.md",
+    "图片提示词.md",
+    "视频提示词.md",
+)
+EXPORT_MEDIA_DIRECTORY = "制作成果"
+EXPORT_SCHEMA = "1.0"
 EPISODE_ID_RE = re.compile(r"EP(?:[0-9]{3}|[1-9][0-9]{3,})")
 WINDOWS_FORBIDDEN_PATH_CHARACTERS = frozenset('<>:"|?*')
 WINDOWS_RESERVED_PATH_STEMS = frozenset(
@@ -1788,6 +1797,149 @@ def _manifest_problems(
     return problems
 
 
+def _export_regular_file(source: Path, destination: Path) -> str:
+    """Copy one regular project file into the export tree and return its digest."""
+    details = os.lstat(source)
+    if _is_link_or_reparse(details) or not stat.S_ISREG(details.st_mode):
+        raise ProjectConflictError(f"export source is not a regular file: {source.name}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    return sha256_file(destination)
+
+
+def _export_episode(
+    episode_directory: Path, target: Path, *, include_media: bool
+) -> tuple[list[dict[str, str]], list[str]]:
+    files: list[dict[str, str]] = []
+    missing: list[str] = []
+    for name in CREATOR_DOCUMENTS:
+        source = episode_directory / name
+        if not source.exists():
+            missing.append(name)
+            continue
+        digest = _export_regular_file(source, target / name)
+        files.append({"path": name, "sha256": digest})
+    media_root = episode_directory / EXPORT_MEDIA_DIRECTORY
+    if include_media and media_root.is_dir() and not media_root.is_symlink():
+        for source in sorted(media_root.rglob("*")):
+            if source.is_dir() and not source.is_symlink():
+                continue
+            relative = source.relative_to(episode_directory).as_posix()
+            digest = _export_regular_file(source, target / relative)
+            files.append({"path": relative, "sha256": digest})
+    return files, missing
+
+
+def build_creator_export(
+    root: Path,
+    *,
+    out: Path,
+    episodes: Sequence[str] | None = None,
+    include_media: bool = True,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Copy the current creator documents and produced media into a handover tree.
+
+    This is a snapshot of what the project holds right now.  It deliberately
+    asserts nothing about review or creator acceptance; `package` remains the
+    only command that speaks for an approved delivery.
+    """
+    root = find_project(root)
+    destination = out.expanduser().resolve()
+    if destination == root or root in destination.parents:
+        raise ValueError("export destination must live outside the project root")
+    layout = _project_layout_from_root(root)
+    if layout["mode"] == "mixed":
+        raise PackageBlockedError("mixed project layouts cannot be exported")
+    episodes_root = root / str(layout["roots"]["episodes"])
+    available = sorted(
+        entry.name
+        for entry in episodes_root.iterdir()
+        if entry.is_dir() and not entry.is_symlink()
+        if EPISODE_ID_RE.fullmatch(entry.name)
+    ) if episodes_root.is_dir() and not episodes_root.is_symlink() else []
+    if episodes:
+        selected = []
+        for episode in episodes:
+            if EPISODE_ID_RE.fullmatch(episode) is None:
+                raise ValueError("episode must use an EP001-style identifier")
+            if episode not in available:
+                raise FileNotFoundError(f"episode directory not found: {episode}")
+            if episode not in selected:
+                selected.append(episode)
+    else:
+        selected = available
+    if not selected:
+        raise FileNotFoundError("no episode directory to export")
+    if destination.exists() and not overwrite:
+        raise FileExistsError(f"export destination already exists: {destination}")
+
+    project = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.tmp"
+    temporary.mkdir()
+    try:
+        exported: list[dict[str, Any]] = []
+        members: list[dict[str, str]] = []
+        episodes_name = str(layout["roots"]["episodes"])
+        for episode in selected:
+            target = temporary / episodes_name / episode
+            target.mkdir(parents=True)
+            files, missing = _export_episode(
+                episodes_root / episode, target, include_media=include_media
+            )
+            for entry in files:
+                members.append(
+                    {
+                        "path": f"{episodes_name}/{episode}/{entry['path']}",
+                        "sha256": entry["sha256"],
+                    }
+                )
+            exported.append(
+                {"episode": episode, "files": files, "missing_documents": missing}
+            )
+        config_digest = _export_regular_file(
+            root / PROJECT_FILE, temporary / PROJECT_FILE
+        )
+        members.append({"path": PROJECT_FILE, "sha256": config_digest})
+        manifest = {
+            "schema_version": EXPORT_SCHEMA,
+            "kind": "creator_export",
+            "asserts_approval": False,
+            "project_id": project.get("project_id"),
+            "title": project.get("title"),
+            "created_at": utc_now(),
+            "episodes": exported,
+            "excluded": [
+                CANONICAL_ROOTS["inputs"],
+                CANONICAL_ROOTS["delivery"],
+                ".short-drama",
+            ],
+        }
+        atomic_json(temporary / "manifest.json", manifest)
+        checksum_members = ["manifest.json", *(entry["path"] for entry in members)]
+        checksums = "".join(
+            f"{sha256_file(temporary / relative)}  {relative}\n"
+            for relative in sorted(checksum_members)
+        )
+        _atomic_bytes(temporary / "checksums.sha256", checksums.encode("utf-8"))
+        _replace_directory(temporary, destination)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+    return {
+        "kind": "creator_export",
+        "out": str(destination),
+        "episodes": [entry["episode"] for entry in exported],
+        "files": [entry["path"] for entry in members],
+        "missing_documents": {
+            entry["episode"]: entry["missing_documents"]
+            for entry in exported
+            if entry["missing_documents"]
+        },
+    }
+
+
 def verify_delivery_package(root: Path, *, episode: str) -> dict[str, Any]:
     if EPISODE_ID_RE.fullmatch(episode) is None:
         raise ValueError("episode must use an EP001-style identifier")
@@ -2011,6 +2163,29 @@ def build_parser() -> argparse.ArgumentParser:
     verify = commands.add_parser("verify", help="Re-check a delivered package checksums.")
     verify.add_argument("path")
     verify.add_argument("--episode", required=True)
+
+    export = commands.add_parser(
+        "export",
+        help="Copy the current creator documents and produced media for handover.",
+    )
+    export.add_argument("path")
+    export.add_argument("--out", required=True, type=Path)
+    export.add_argument(
+        "--episode",
+        action="append",
+        dest="episodes",
+        help="Export only this episode; repeat for several. Default: every episode.",
+    )
+    export.add_argument(
+        "--no-media",
+        action="store_true",
+        help=f"Skip 剧集/<EP>/{EXPORT_MEDIA_DIRECTORY}/ and export text only.",
+    )
+    export.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace an existing export directory at --out.",
+    )
     return parser
 
 
@@ -2066,6 +2241,14 @@ def main(argv: list[str] | None = None) -> int:
                 episode=args.episode,
                 includes=args.includes,
                 omissions=_parse_omissions(args.omissions),
+            )
+        elif args.command == "export":
+            result = build_creator_export(
+                Path(args.path),
+                out=args.out,
+                episodes=args.episodes,
+                include_media=not args.no_media,
+                overwrite=args.overwrite,
             )
         else:
             result = verify_delivery_package(Path(args.path), episode=args.episode)

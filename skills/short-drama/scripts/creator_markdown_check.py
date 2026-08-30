@@ -34,6 +34,13 @@ REF_RE = re.compile(
     r"（控制：([^；）]+)；不得控制：([^）]+)）",
     re.IGNORECASE,
 )
+LOCK_LINE_RE = re.compile(r"^- *连续性锁：.*$", re.MULTILINE)
+LOCK_RE = re.compile(
+    r"^- 连续性锁：(LOCK-[A-Z0-9-]+)《([^》\n]+)》"
+    r"（镜头：([^；）\n]+)"
+    r"(?:；图片提示词项：([^；）\n]+))?）"
+    r"· 锁面：(.+)$"
+)
 
 
 def _sections(document: str, kind: str) -> dict[str, str]:
@@ -82,10 +89,10 @@ def _is_no_external_reference(value: str) -> bool:
     )
 
 
-def _copyable_prompt(section: str) -> Optional[str]:
-    markers = list(
-        re.finditer(r"^### 可复制(?:通用)?提示词\s*$", section, re.MULTILINE)
-    )
+def _copyable_prompt(
+    section: str, heading: str = r"可复制(?:通用)?提示词"
+) -> Optional[str]:
+    markers = list(re.finditer(rf"^### {heading}\s*$", section, re.MULTILINE))
     if len(markers) != 1:
         return None
     body = section[markers[0].end() :]
@@ -168,6 +175,87 @@ def _references(value: str, owner: str, project_root: Path, errors: list[str]) -
             errors.append(f"{owner}: REF 控制与不得控制范围冲突: {match.group(1)}")
 
 
+def _continuity_locks(document: str, errors: list[str]) -> list[dict[str, object]]:
+    """Parse the declared continuity locks of one 视觉设定.md."""
+    locks: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for line in LOCK_LINE_RE.findall(document):
+        match = LOCK_RE.match(line)
+        if match is None:
+            errors.append("视觉设定.md: 连续性锁必须使用完整语法")
+            continue
+        lock_id, label, scope, image_scope, surface = match.groups()
+        if lock_id in seen:
+            errors.append(f"{lock_id}: 连续性锁 ID 重复")
+            continue
+        seen.add(lock_id)
+        if not re.search(r"[\u3400-\u9fff]", label):
+            errors.append(f"{lock_id}: 连续性锁缺少中文名称")
+        surface = _plain(surface)
+        if not surface:
+            errors.append(f"{lock_id}: 连续性锁缺少锁面")
+            continue
+        shots = [item.strip() for item in re.split(r"[、,，]", _plain(scope)) if item.strip()]
+        if not shots:
+            errors.append(f"{lock_id}: 连续性锁缺少镜头范围")
+            continue
+        if "全集" in shots and len(shots) != 1:
+            errors.append(f"{lock_id}: 连续性锁的镜头范围不能把全集与具体镜头混写")
+            continue
+        images: list[str] = []
+        if image_scope is not None and not _is_none(image_scope):
+            images = [
+                item.strip()
+                for item in re.split(r"[、,，]", _plain(image_scope))
+                if item.strip()
+            ]
+            if any(not item.startswith("IMG-") for item in images):
+                errors.append(f"{lock_id}: 连续性锁的图片提示词项必须使用 IMG-  ID")
+                continue
+        locks.append(
+            {"id": lock_id, "surface": surface, "shots": shots, "images": images}
+        )
+    return locks
+
+
+def _check_continuity_locks(
+    locks: list[dict[str, object]],
+    *,
+    shots: dict[str, str],
+    motion_by_shot: dict[str, tuple[str, str, Optional[str]]],
+    image_prompts: dict[str, Optional[str]],
+    errors: list[str],
+) -> None:
+    """Require every declared lock surface to be present where it was scoped."""
+    for lock in locks:
+        lock_id = str(lock["id"])
+        surface = str(lock["surface"]).casefold()
+        scoped = list(lock["shots"])  # type: ignore[arg-type]
+        targets = sorted(shots) if scoped == ["全集"] else scoped
+        for shot_id in targets:
+            if shot_id not in shots:
+                errors.append(f"{lock_id}: 连续性锁指向不存在的镜头: {shot_id}")
+                continue
+            keyframe = _copyable_prompt(shots[shot_id], heading=r"冻结关键帧提示词")
+            if keyframe is None:
+                errors.append(f"{lock_id}: {shot_id} 缺少可读的冻结关键帧提示词")
+            elif surface not in keyframe.casefold():
+                errors.append(f"{lock_id}: {shot_id} 冻结关键帧提示词缺少锁面")
+            motion = motion_by_shot.get(shot_id)
+            if motion is None:
+                continue
+            motion_id, _, copyable_prompt = motion
+            if copyable_prompt is not None and surface not in copyable_prompt.casefold():
+                errors.append(f"{lock_id}: {motion_id} 可复制提示词缺少锁面")
+        for image_id in lock["images"]:  # type: ignore[union-attr]
+            if image_id not in image_prompts:
+                errors.append(f"{lock_id}: 连续性锁指向不存在的 IMG 条目: {image_id}")
+                continue
+            image_prompt = image_prompts[image_id]
+            if image_prompt is not None and surface not in image_prompt.casefold():
+                errors.append(f"{lock_id}: {image_id} 可复制提示词缺少锁面")
+
+
 def validate_episode(episode: Path, project_root: Optional[Path] = None) -> list[str]:
     """Return all deterministic contract errors for ``episode``."""
     episode = episode.resolve()
@@ -180,6 +268,8 @@ def validate_episode(episode: Path, project_root: Optional[Path] = None) -> list
     images = (episode / "图片提示词.md").read_text(encoding="utf-8")
     storyboard = (episode / "分镜.md").read_text(encoding="utf-8")
     video = (episode / "视频提示词.md").read_text(encoding="utf-8")
+    visual = (episode / "视觉设定.md").read_text(encoding="utf-8")
+    locks = _continuity_locks(visual, errors)
     image_pairs = re.findall(r"^## (IMG-[A-Z0-9-]+) · (.+)$", images, re.MULTILINE)
     image_headings = dict(image_pairs)
     all_image_headings = re.findall(r"^## (IMG-[A-Z0-9-]+)\b", images, re.MULTILINE)
@@ -191,6 +281,7 @@ def validate_episode(episode: Path, project_root: Optional[Path] = None) -> list
         if not re.search(r"[\u3400-\u9fff]", label):
             errors.append(f"{image_id}: IMG 标题缺少中文名称")
     image_matches = list(re.finditer(r"^## (IMG-[A-Z0-9-]+)\b", images, re.MULTILINE))
+    image_prompts: dict[str, Optional[str]] = {}
     for index, match in enumerate(image_matches):
         body = images[
             match.start() : image_matches[index + 1].start()
@@ -210,7 +301,9 @@ def validate_episode(episode: Path, project_root: Optional[Path] = None) -> list
             errors.append(
                 f"{match.group(1)}: 参考必须声明无外部参考或使用完整 REF 语法"
             )
-        if _copyable_prompt(body) is None:
+        image_prompt = _copyable_prompt(body)
+        image_prompts[match.group(1)] = image_prompt
+        if image_prompt is None:
             errors.append(f"{match.group(1)}: 缺少唯一且非空的可复制提示词")
 
     shots = _sections(storyboard, "SHOT")
@@ -310,6 +403,13 @@ def validate_episode(episode: Path, project_root: Optional[Path] = None) -> list
             ):
                 errors.append(f"{motion_id}: 可复制提示词没有包含静态视觉锚点")
 
+    _check_continuity_locks(
+        locks,
+        shots=shots,
+        motion_by_shot=motion_by_shot,
+        image_prompts=image_prompts,
+        errors=errors,
+    )
     return errors
 
 

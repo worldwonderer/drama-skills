@@ -215,6 +215,144 @@ class ProviderCompilerTests(unittest.TestCase):
             )
 
 
+    def minimax_video_profile(self) -> dict[str, object]:
+        return {
+            "allowed_ratios": {"9:16"},
+            "allowed_resolutions": {"768P"},
+            "duration_range": (4, 15),
+        }
+
+    def test_minimax_h3_payload_carries_only_configured_values(self) -> None:
+        payload = provider_adapters.compile_minimax_h3_payload(
+            self.video_job(duration=6, ratio="9:16", resolution="768P"),
+            model="account-enabled-video-model",
+            **self.minimax_video_profile(),
+        )
+        self.assertEqual(
+            payload,
+            {
+                "model": "account-enabled-video-model",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "slow push in as the evidence is revealed",
+                    }
+                ],
+                "duration": 6,
+                "resolution": "768P",
+                "ratio": "9:16",
+            },
+        )
+
+    def test_minimax_h3_requires_an_explicit_runtime_profile(self) -> None:
+        job = self.video_job(duration=6, ratio="9:16", resolution="768P")
+        with self.assertRaisesRegex(ValueError, "explicitly configured"):
+            provider_adapters.compile_minimax_h3_payload(
+                job, model="", **self.minimax_video_profile()
+            )
+        with self.assertRaisesRegex(ValueError, "duration needs an explicit model profile"):
+            provider_adapters.compile_minimax_h3_payload(
+                job,
+                model="m",
+                allowed_ratios={"9:16"},
+                allowed_resolutions={"768P"},
+            )
+        with self.assertRaisesRegex(ValueError, "resolution needs an explicit model profile"):
+            provider_adapters.compile_minimax_h3_payload(
+                job, model="m", allowed_ratios={"9:16"}, duration_range=(4, 15)
+            )
+        with self.assertRaisesRegex(ValueError, "ratio needs an explicit model profile"):
+            provider_adapters.compile_minimax_h3_payload(
+                job,
+                model="m",
+                allowed_resolutions={"768P"},
+                duration_range=(4, 15),
+            )
+        with self.assertRaisesRegex(ValueError, "outside the configured model profile"):
+            provider_adapters.compile_minimax_h3_payload(
+                self.video_job(duration=30, ratio="9:16", resolution="768P"),
+                model="m",
+                **self.minimax_video_profile(),
+            )
+        with self.assertRaisesRegex(ValueError, "outside the supported profile"):
+            provider_adapters.compile_minimax_h3_payload(
+                self.video_job(duration=6, ratio="9:16", resolution="8K"),
+                model="m",
+                **self.minimax_video_profile(),
+            )
+
+    def test_minimax_h3_text_to_video_needs_a_concrete_ratio(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires an explicit ratio"):
+            provider_adapters.compile_minimax_h3_payload(
+                self.video_job(duration=6, resolution="768P"),
+                model="m",
+                **self.minimax_video_profile(),
+            )
+        with self.assertRaisesRegex(ValueError, "adaptive ratio"):
+            provider_adapters.compile_minimax_h3_payload(
+                self.video_job(duration=6, ratio="adaptive", resolution="768P"),
+                model="m",
+                allowed_ratios={"adaptive"},
+                allowed_resolutions={"768P"},
+                duration_range=(4, 15),
+            )
+
+    def test_minimax_h3_references_need_a_hosted_uri_and_a_declared_role(self) -> None:
+        job = {
+            **self.video_job(duration=6, resolution="768P"),
+            "references": ["输入/first.png"],
+            "reference_bindings": [
+                {
+                    **self.reference_binding(),
+                    "path": "输入/first.png",
+                    "role": "start_frame",
+                }
+            ],
+        }
+        payload = provider_adapters.compile_minimax_h3_payload(
+            job,
+            model="m",
+            reference_urls=["https://cdn.example/first.png"],
+            reference_roles=["first_frame"],
+            **self.minimax_video_profile(),
+        )
+        self.assertEqual(
+            payload["content"][1],
+            {
+                "type": "image_url",
+                "image_url": {"url": "https://cdn.example/first.png"},
+                "role": "first_frame",
+            },
+        )
+        self.assertNotIn("ratio", payload)
+        with self.assertRaisesRegex(ValueError, "HTTPS or mm_file"):
+            provider_adapters.compile_minimax_h3_payload(
+                job,
+                model="m",
+                reference_urls=["file:///etc/passwd"],
+                reference_roles=["first_frame"],
+                **self.minimax_video_profile(),
+            )
+        with self.assertRaisesRegex(ValueError, "unsupported MiniMax reference role"):
+            provider_adapters.compile_minimax_h3_payload(
+                job,
+                model="m",
+                reference_urls=["https://cdn.example/first.png"],
+                reference_roles=["identity"],
+                **self.minimax_video_profile(),
+            )
+
+    def test_minimax_h3_refuses_a_prompt_beyond_the_provider_limit(self) -> None:
+        long_job = {
+            **self.video_job(duration=6, ratio="9:16", resolution="768P"),
+            "prompt": "a" * (provider_adapters.MINIMAX_VIDEO_PROMPT_LIMIT + 1),
+        }
+        with self.assertRaisesRegex(ValueError, "exceeds the provider limit"):
+            provider_adapters.compile_minimax_h3_payload(
+                long_job, model="m", **self.minimax_video_profile()
+            )
+
+
 class ProviderRuntimeTests(unittest.TestCase):
     def test_http_failures_expose_only_stable_whitelisted_evidence(self) -> None:
         cases = (
@@ -351,6 +489,89 @@ class ProviderRuntimeTests(unittest.TestCase):
                     )
                     self.assertEqual(path.read_bytes(), b"ID3music")
                     self.assertEqual(trace_id, "minimax-trace")
+
+    def test_minimax_video_runtime_maps_a_successful_offline_response(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {
+                "MINIMAX_API_KEY": "minimax-secret",
+                "MINIMAX_VIDEO_MODEL": "configured-video-model",
+                "MINIMAX_VIDEO_RESOLUTIONS": "768P",
+                "MINIMAX_VIDEO_RATIOS": "9:16",
+                "MINIMAX_VIDEO_MIN_DURATION": "4",
+                "MINIMAX_VIDEO_MAX_DURATION": "15",
+            }
+            job = {
+                "modality": "video",
+                "prompt": "camera holds",
+                "references": [],
+                "outputs": ["制作成果/shot.mp4"],
+                "parameters": {"duration": 6, "ratio": "9:16", "resolution": "768P"},
+                "project_root": str(root),
+                "output_root": str(root),
+            }
+            with mock.patch.dict(os.environ, environment, clear=False):
+                with mock.patch.object(
+                    provider_adapters,
+                    "_request_json",
+                    side_effect=[
+                        ({"task_id": "minimax-video-task"}, {}),
+                        ({"task": {"status": "running"}}, {}),
+                        (
+                            {
+                                "task": {
+                                    "status": "succeeded",
+                                    "content": {"url": "https://cdn.example/shot.mp4"},
+                                }
+                            },
+                            {},
+                        ),
+                    ],
+                ), mock.patch.object(
+                    provider_adapters, "_download", return_value=root / "shot.mp4"
+                ), mock.patch.object(provider_adapters.time, "sleep"):
+                    path, task_id = provider_adapters._run_minimax_video(job)
+                self.assertEqual((path, task_id), (root / "shot.mp4", "minimax-video-task"))
+
+                with mock.patch.object(
+                    provider_adapters,
+                    "_request_json",
+                    side_effect=[
+                        ({"task_id": "minimax-video-task"}, {}),
+                        ({"task": {"status": "surprising"}}, {}),
+                    ],
+                ), mock.patch.object(provider_adapters.time, "sleep"):
+                    with self.assertRaises(provider_adapters.AdapterFailure) as raised:
+                        provider_adapters._run_minimax_video(job)
+                self.assertEqual(
+                    raised.exception.public("minimax-h3")["code"], "unknown_task_status"
+                )
+
+    def test_minimax_video_runtime_refuses_an_invalid_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            job = {
+                "modality": "video",
+                "prompt": "camera holds",
+                "references": [],
+                "outputs": ["制作成果/shot.mp4"],
+                "parameters": {"duration": 6, "ratio": "9:16", "resolution": "768P"},
+                "project_root": str(root),
+                "output_root": str(root),
+            }
+            broken = {
+                "MINIMAX_API_KEY": "minimax-secret",
+                "MINIMAX_VIDEO_MODEL": "configured-video-model",
+                "MINIMAX_VIDEO_RESOLUTIONS": "4K",
+                "MINIMAX_VIDEO_MIN_DURATION": "4",
+                "MINIMAX_VIDEO_MAX_DURATION": "15",
+            }
+            with mock.patch.dict(os.environ, broken, clear=False):
+                with self.assertRaises(provider_adapters.AdapterFailure) as raised:
+                    provider_adapters._run_minimax_video(job)
+            self.assertEqual(
+                raised.exception.public("minimax-h3")["code"], "invalid_model_profile"
+            )
 
     def test_seedance_runtime_refuses_unhosted_local_references(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

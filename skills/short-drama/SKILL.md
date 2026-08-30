@@ -56,8 +56,20 @@ python3 {技能目录}/scripts/project_tool.py init ./my-drama --title "示例�
 项目定位与安全写入见 [运行预检](references/runtime-preflight.md)。用户明确要求 Dashboard 时运行：
 
 ```bash
-python3 {技能目录}/scripts/dashboard_server.py --workspace <workspace> --port 0 --open
+python3 {技能目录}/scripts/dashboard_server.py --workspace <workspace> --port 0 --detach --open
 ```
+
+`--detach` 让服务进程脱离当前 shell 独立运行，会话结束、终端关闭或智能体退出都不会带走它；
+链接因此在整个创作期间保持有效。运行中的地址、端口和 pid 记录在
+`<workspace>/.short-drama/dashboard.json`（仅本人可读），日志在同目录 `dashboard.log`：
+
+```bash
+python3 {技能目录}/scripts/dashboard_server.py --workspace <workspace> --status   # 打印当前链接
+python3 {技能目录}/scripts/dashboard_server.py --workspace <workspace> --stop     # 停止
+```
+
+同一 workspace 已有在跑的 Dashboard 时，再次启动只会打印同一个链接，不再开第二个端口；确实要换
+端口或换令牌时加 `--restart`。不加 `--detach` 时行为不变：前台运行，Ctrl-C 结束。
 
 Dashboard 展示和编辑创作文件，不负责工作流编排或媒体生产。
 
@@ -80,6 +92,20 @@ Look Development 是可选分支，不是进入图片提示词或分镜的固定
 
 外部生产永远保留 `preview -> explicit confirm -> run`。归档只复制用户点名的当前文档和成品，排除
 私有输入、凭据、绝对路径与隐藏运行状态；不为归档补造审批、哈希或第二套内容。
+
+用户问“做完了怎么导出/交付给我”时，用 `export` 打包当前状态：
+
+```bash
+python3 {技能目录}/scripts/project_tool.py export <project> --out <项目外目录>
+```
+
+它把每集现有的五份创作文档和 `剧集/<EP>/制作成果/` 复制到 `--out`，附 `manifest.json` 与
+`checksums.sha256`，并排除 `输入/`、`交付/` 和 `.short-drama/`。只要一部分时加
+`--episode EP001`（可重复）；只要文字时加 `--no-media`；覆盖旧目录加 `--overwrite`。
+`--out` 必须在项目之外。
+
+`export` 是**当前状态快照**，manifest 里 `asserts_approval` 恒为 `false`：它不声称任何审查或
+创作者接受。需要带审批证据的正式交付包仍然只有 `package`/`verify` 那条路径。
 
 ## 安装维护
 

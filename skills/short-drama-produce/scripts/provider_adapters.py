@@ -32,6 +32,7 @@ MINIMAX_MUSIC_MODEL = "music-3.0"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 SEEDANCE_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 MINIMAX_BASE_URL = "https://api.minimax.io/v1"
+MINIMAX_VIDEO_BASE_URL = "https://api.minimax.io/v2"
 MAX_JSON_RESPONSE = 128 * 1024 * 1024
 MAX_OUTPUT_BYTES = 512 * 1024 * 1024
 MAX_REFERENCE_BYTES = 50 * 1024 * 1024
@@ -39,6 +40,16 @@ MAX_MULTIPART_BYTES = 200 * 1024 * 1024
 MAX_ERROR_BODY_BYTES = 64 * 1024
 TERMINAL_FAILURES = {"failed", "cancelled", "canceled", "timeout", "expired"}
 SEEDANCE_RATIOS = {"adaptive", "1:1", "3:4", "4:3", "9:16", "16:9", "21:9"}
+MINIMAX_VIDEO_RATIOS = {"adaptive", "1:1", "3:4", "4:3", "9:16", "16:9", "21:9"}
+MINIMAX_VIDEO_RESOLUTIONS = {"480P", "768P", "2K"}
+MINIMAX_VIDEO_PROMPT_LIMIT = 7000
+MINIMAX_VIDEO_ROLES = {
+    "first_frame": "image_url",
+    "last_frame": "image_url",
+    "reference_image": "image_url",
+    "reference_video": "video_url",
+    "reference_audio": "audio_url",
+}
 GPT_IMAGE_MIN_PIXELS = 655_360
 GPT_IMAGE_MAX_PIXELS = 8_294_400
 MINIMUM_PYTHON = (3, 9)
@@ -343,6 +354,152 @@ def _seedance_runtime_profile(
             code="invalid_model_profile",
         )
     return allowed_ratios, duration_range
+
+
+def compile_minimax_h3_payload(
+    job: Mapping[str, Any],
+    *,
+    model: str,
+    reference_urls: Sequence[str] = (),
+    reference_roles: Sequence[str] = (),
+    allowed_ratios: Collection[str] | None = None,
+    allowed_resolutions: Collection[str] | None = None,
+    duration_range: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    """Compile a video job into the official MiniMax video-generation task body.
+
+    ``model`` is mandatory for the same reason it is for Seedance: which release
+    is enabled, and what it accepts, is deployment configuration, never an
+    assumption made here.
+    """
+    prompt, parameters = _require_job(job, "video")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("MiniMax video model must be explicitly configured")
+    references = job.get("references", [])
+    if not isinstance(references, list) or len(reference_urls) != len(references):
+        raise ValueError("MiniMax reference URLs must match job references")
+    if len(reference_roles) != len(reference_urls):
+        raise ValueError("MiniMax reference roles must match job references")
+    if Path(job["outputs"][0]).suffix.casefold() != ".mp4":
+        raise ValueError("MiniMax video adapter requires an MP4 target")
+    parameters = _take(parameters, {"duration", "ratio", "resolution"})
+
+    duration = parameters.get("duration")
+    if not isinstance(duration, int) or isinstance(duration, bool):
+        raise ValueError("MiniMax video duration must be an integer number of seconds")
+    if duration_range is None:
+        raise ValueError("MiniMax video duration needs an explicit model profile")
+    minimum, maximum = duration_range
+    if not 1 <= minimum <= maximum or not minimum <= duration <= maximum:
+        raise ValueError("MiniMax video duration is outside the configured model profile")
+
+    resolution = parameters.get("resolution")
+    if not isinstance(resolution, str) or resolution.strip() not in MINIMAX_VIDEO_RESOLUTIONS:
+        raise ValueError("MiniMax video resolution is outside the supported profile")
+    configured_resolutions = set(allowed_resolutions or ())
+    if not configured_resolutions:
+        raise ValueError("MiniMax video resolution needs an explicit model profile")
+    if (
+        not configured_resolutions <= MINIMAX_VIDEO_RESOLUTIONS
+        or resolution.strip() not in configured_resolutions
+    ):
+        raise ValueError("MiniMax video resolution is outside the configured model profile")
+
+    ratio = parameters.get("ratio")
+    if ratio is not None:
+        if not isinstance(ratio, str) or ratio.strip() not in MINIMAX_VIDEO_RATIOS:
+            raise ValueError("MiniMax video ratio is outside the supported profile")
+        configured_ratios = set(allowed_ratios or ())
+        if not configured_ratios:
+            raise ValueError("MiniMax video ratio needs an explicit model profile")
+        if (
+            not configured_ratios <= MINIMAX_VIDEO_RATIOS
+            or ratio.strip() not in configured_ratios
+        ):
+            raise ValueError("MiniMax video ratio is outside the configured model profile")
+
+    text = _prompt_with_reference_contract(prompt, job)
+    if len(text) > MINIMAX_VIDEO_PROMPT_LIMIT:
+        raise ValueError("MiniMax video prompt exceeds the provider limit")
+    content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+    seen_roles: list[str] = []
+    for index, url in enumerate(reference_urls):
+        role = reference_roles[index]
+        if role not in MINIMAX_VIDEO_ROLES:
+            raise ValueError(f"unsupported MiniMax reference role: {role}")
+        if role in {"first_frame", "last_frame"} and role in seen_roles:
+            raise ValueError(f"MiniMax accepts one {role} reference")
+        seen_roles.append(role)
+        if not isinstance(url, str) or not url:
+            raise ValueError("MiniMax reference URL must be non-empty")
+        parsed = urllib.parse.urlparse(url)
+        if not (
+            (parsed.scheme == "https" and parsed.netloc)
+            or (parsed.scheme == "mm_file" and parsed.netloc and not parsed.path)
+        ):
+            raise ValueError("MiniMax reference URL must be HTTPS or mm_file://")
+        field = MINIMAX_VIDEO_ROLES[role]
+        content.append({"type": field, field: {"url": url}, "role": role})
+    if ratio is None and len(content) == 1:
+        raise ValueError("MiniMax text-to-video requires an explicit ratio")
+    body: dict[str, Any] = {
+        "model": model.strip(),
+        "content": content,
+        "duration": duration,
+        "resolution": resolution.strip(),
+    }
+    if ratio is not None:
+        if ratio.strip() == "adaptive" and len(content) == 1:
+            raise ValueError("MiniMax text-to-video cannot use an adaptive ratio")
+        body["ratio"] = ratio.strip()
+    return body
+
+
+def _minimax_video_runtime_profile() -> tuple[
+    frozenset[str] | None, frozenset[str] | None, tuple[int, int] | None
+]:
+    def _set(name: str, supported: Collection[str]) -> frozenset[str] | None:
+        raw = os.environ.get(name)
+        if raw is None:
+            return None
+        values = frozenset(item.strip() for item in raw.split(",") if item.strip())
+        if not values or not values <= set(supported):
+            raise AdapterFailure(
+                f"MiniMax video profile is invalid: {name}",
+                category="configuration",
+                code="invalid_model_profile",
+            )
+        return values
+
+    allowed_ratios = _set("MINIMAX_VIDEO_RATIOS", MINIMAX_VIDEO_RATIOS)
+    allowed_resolutions = _set("MINIMAX_VIDEO_RESOLUTIONS", MINIMAX_VIDEO_RESOLUTIONS)
+    minimum_raw = os.environ.get("MINIMAX_VIDEO_MIN_DURATION")
+    maximum_raw = os.environ.get("MINIMAX_VIDEO_MAX_DURATION")
+    if (minimum_raw is None) != (maximum_raw is None):
+        raise AdapterFailure(
+            "MiniMax video duration profile is incomplete",
+            category="configuration",
+            code="invalid_model_profile",
+        )
+    try:
+        duration_range = (
+            (int(minimum_raw), int(maximum_raw))
+            if minimum_raw is not None and maximum_raw is not None
+            else None
+        )
+    except ValueError as exc:
+        raise AdapterFailure(
+            "MiniMax video duration profile is invalid",
+            category="configuration",
+            code="invalid_model_profile",
+        ) from exc
+    if duration_range is not None and not 1 <= duration_range[0] <= duration_range[1]:
+        raise AdapterFailure(
+            "MiniMax video duration profile is invalid",
+            category="configuration",
+            code="invalid_model_profile",
+        )
+    return allowed_ratios, allowed_resolutions, duration_range
 
 
 def compile_gpt_image_2_payload(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -911,6 +1068,86 @@ def _run_minimax(job: Mapping[str, Any]) -> tuple[Path, str | None]:
     )
 
 
+def _run_minimax_video(job: Mapping[str, Any]) -> tuple[Path, str]:
+    token = _credential("MINIMAX_API_KEY")
+    model = os.environ.get("MINIMAX_VIDEO_MODEL", "")
+    if _reference_paths(job):
+        raise AdapterFailure(
+            "MiniMax local references require an external trusted HTTPS or mm_file upload adapter"
+        )
+    ratios, resolutions, duration_range = _minimax_video_runtime_profile()
+    body = compile_minimax_h3_payload(
+        job,
+        model=model,
+        allowed_ratios=ratios,
+        allowed_resolutions=resolutions,
+        duration_range=duration_range,
+    )
+    base = _base_url("MINIMAX_VIDEO_BASE_URL", MINIMAX_VIDEO_BASE_URL)
+    created, _ = _request_json(
+        f"{base}/video_generation",
+        provider="minimax-h3",
+        body=body,
+        token=token,
+    )
+    task_id = created.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        raise AdapterFailure(
+            "MiniMax did not return a task id",
+            code=_provider_code(created) or "missing_task_id",
+        )
+    try:
+        interval = float(os.environ.get("MINIMAX_VIDEO_POLL_INTERVAL", "5"))
+        deadline = time.monotonic() + float(
+            os.environ.get("MINIMAX_VIDEO_TIMEOUT_SECONDS", "1800")
+        )
+    except ValueError as exc:
+        raise AdapterFailure("MiniMax polling configuration is invalid") from exc
+    if interval <= 0 or deadline <= time.monotonic():
+        raise AdapterFailure("MiniMax polling configuration is invalid")
+    while time.monotonic() < deadline:
+        document, _ = _request_json(
+            f"{base}/video_generation/{urllib.parse.quote(task_id, safe='')}",
+            provider="minimax-h3",
+            method="GET",
+            token=token,
+        )
+        task = document.get("task")
+        status = task.get("status") if isinstance(task, Mapping) else None
+        if status == "succeeded":
+            content = task.get("content") if isinstance(task, Mapping) else None
+            url = content.get("url") if isinstance(content, Mapping) else None
+            if not isinstance(url, str):
+                raise AdapterFailure(
+                    "MiniMax succeeded without a video URL",
+                    code="missing_video_url",
+                    request_id=task_id,
+                )
+            return _download(
+                job, url, job["outputs"][0], provider="minimax-h3"
+            ), task_id
+        if isinstance(status, str) and status.casefold() in TERMINAL_FAILURES:
+            raise AdapterFailure(
+                "MiniMax video task failed",
+                code="task_" + status.casefold(),
+                request_id=task_id,
+            )
+        if status not in {"queued", "running", "processing", "pending", "in_progress"}:
+            raise AdapterFailure(
+                "MiniMax returned an unknown task status",
+                code="unknown_task_status",
+                request_id=task_id,
+            )
+        time.sleep(interval)
+    raise AdapterFailure(
+        "MiniMax video task polling timed out",
+        category="timeout",
+        code="task_poll_timeout",
+        request_id=task_id,
+        retryable=True,
+    )
+
+
 def _selftest() -> None:
     image = {
         "modality": "image", "prompt": "portrait", "references": [],
@@ -936,6 +1173,28 @@ def _selftest() -> None:
         raise RuntimeError("Seedance model self-test failed")
     if not seedance["content"][0]["text"].endswith("--ratio 9:16 --dur 5"):
         raise RuntimeError("Seedance prompt switch self-test failed")
+    minimax_video = compile_minimax_h3_payload(
+        {**video, "parameters": {"duration": 6, "ratio": "9:16", "resolution": "768P"}},
+        model="configured-video-model",
+        allowed_ratios={"9:16"},
+        allowed_resolutions={"768P"},
+        duration_range=(4, 15),
+    )
+    if minimax_video["model"] != "configured-video-model":
+        raise RuntimeError("MiniMax video model self-test failed")
+    if minimax_video["duration"] != 6 or minimax_video["resolution"] != "768P":
+        raise RuntimeError("MiniMax video parameter self-test failed")
+    try:
+        compile_minimax_h3_payload(
+            {**video, "parameters": {"duration": 6, "resolution": "768P"}},
+            model="configured-video-model",
+            allowed_resolutions={"768P"},
+            duration_range=(4, 15),
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("MiniMax text-to-video without a ratio was accepted")
     compiled_music = compile_minimax_music_payload(music)
     if compiled_music["model"] != MINIMAX_MUSIC_MODEL:
         raise RuntimeError("MiniMax model self-test failed")
@@ -967,7 +1226,11 @@ def _selftest() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("provider", nargs="?", choices=("seedance", "gpt-image-2", "minimax-music"))
+    parser.add_argument(
+        "provider",
+        nargs="?",
+        choices=("seedance", "gpt-image-2", "minimax-music", "minimax-h3"),
+    )
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
     if args.selftest:
@@ -979,7 +1242,12 @@ def main() -> int:
         job = json.load(sys.stdin.buffer)
         if not isinstance(job, Mapping):
             raise ValueError("adapter input must be an object")
-        runners = {"seedance": _run_seedance, "gpt-image-2": _run_openai, "minimax-music": _run_minimax}
+        runners = {
+            "seedance": _run_seedance,
+            "gpt-image-2": _run_openai,
+            "minimax-music": _run_minimax,
+            "minimax-h3": _run_minimax_video,
+        }
         path, provider_job_id = runners[args.provider](job)
         response: dict[str, Any] = {
             "outputs": [{"target": job["outputs"][0], "source": str(path)}]

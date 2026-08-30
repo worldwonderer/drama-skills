@@ -14,7 +14,9 @@ import json
 import os
 import re
 import secrets
+import signal
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -82,6 +84,11 @@ DEFAULT_MAX_MEDIA_BYTES = 256 * 1024 * 1024
 MAX_JSON_EXPANSION = 6
 REQUEST_OVERHEAD_BYTES = 64 * 1024
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+SESSION_SCHEMA = "1.0"
+SESSION_RELATIVE = PurePosixPath(".short-drama/dashboard.json")
+SESSION_LOCK_SUFFIX = ".lock"
+DETACH_TIMEOUT_SECONDS = 20.0
+STOP_TIMEOUT_SECONDS = 10.0
 STATIC_ROOT = SKILL_ROOT / "assets/dashboard"
 
 # Windows opens files in text mode unless told otherwise, which would rewrite
@@ -968,6 +975,7 @@ class DashboardHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, server_address: tuple[str, int], store: ProjectStore) -> None:
         self.store = store
+        self.workspace_fingerprint = workspace_fingerprint(store.workspace)
         self.access_token = secrets.token_urlsafe(32)
         self.api_prefix = f"/_short_drama/{secrets.token_urlsafe(18)}"
         cookie_suffix = hashlib.sha256(self.api_prefix.encode("utf-8")).hexdigest()[:16]
@@ -1309,6 +1317,184 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         )
 
 
+def workspace_fingerprint(workspace: Path) -> str:
+    """Identify one workspace without exposing its path in a response header."""
+    return hashlib.sha256(
+        str(workspace).encode("utf-8", "surrogateescape")
+    ).hexdigest()[:16]
+
+
+def session_file_for(workspace: Path, override: Path | None = None) -> Path:
+    if override is not None:
+        return override.expanduser().resolve()
+    return workspace / Path(str(SESSION_RELATIVE))
+
+
+def read_session(path: Path) -> dict[str, Any] | None:
+    """Return the recorded session, or ``None`` when there is nothing usable."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict) or document.get("schema_version") != SESSION_SCHEMA:
+        return None
+    required = ("host", "port", "token", "fingerprint", "url", "pid")
+    if any(key not in document for key in required):
+        return None
+    return document
+
+
+def write_session(path: Path, document: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    descriptor = os.open(
+        str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+
+
+def session_lock_path(session_path: Path) -> Path:
+    return session_path.with_name(session_path.name + SESSION_LOCK_SUFFIX)
+
+
+def _try_exclusive_lock(handle: Any) -> bool:
+    """Take the serving lock without waiting. False means someone else holds it."""
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"0")
+            handle.flush()
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+@contextlib.contextmanager
+def hold_session_lock(session_path: Path) -> Iterator[Any | None]:
+    """Hold the serving lock for one dashboard, or yield ``None`` if taken.
+
+    Liveness is answered by this lock rather than by probing the recorded port.
+    A PID can be reused and a port can be inherited by something unrelated; a
+    lock is released by the kernel exactly when the serving process ends. It
+    also keeps the dashboard free of any outbound network client.
+    """
+    lock_path = session_lock_path(session_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    if not _try_exclusive_lock(handle):
+        handle.close()
+        yield None
+        return
+    try:
+        yield handle
+    finally:
+        handle.close()
+
+
+def session_is_live(session_path: Path) -> bool:
+    """Answer whether a dashboard is still serving this workspace."""
+    with hold_session_lock(session_path) as handle:
+        return handle is None
+
+
+def stop_session(path: Path) -> bool:
+    """Stop the recorded dashboard and forget it. Returns whether one was live."""
+    session = read_session(path)
+    live = session is not None and session_is_live(path)
+    if live:
+        pid = session.get("pid") if session else None
+        if isinstance(pid, int) and pid > 0:
+            with contextlib.suppress(OSError):
+                os.kill(pid, signal.SIGTERM)
+            deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
+            while time.monotonic() < deadline and session_is_live(path):
+                time.sleep(0.1)
+    with contextlib.suppress(OSError):
+        path.unlink()
+    return live
+
+
+def _detached_child(
+    workspace: Path, *, host: str, port: int, session_path: Path
+) -> subprocess.Popen[bytes]:
+    command = [
+        sys.executable,
+        "-B",
+        str(Path(__file__).resolve()),
+        "--workspace",
+        str(workspace),
+        "--host",
+        host,
+        "--port",
+        str(port),
+        "--session-file",
+        str(session_path),
+    ]
+    log_path = session_path.with_name(f"{session_path.stem}.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log = open(log_path, "ab")
+    options: dict[str, Any] = {}
+    if os.name == "nt":
+        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: no console to inherit and
+        # no Ctrl-C from the launching shell.
+        options["creationflags"] = 0x00000008 | 0x00000200
+    else:
+        options["start_new_session"] = True
+    try:
+        return subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            close_fds=True,
+            cwd=str(workspace),
+            **options,
+        )
+    finally:
+        log.close()
+
+
+def start_detached(
+    workspace: Path, *, host: str, port: int, session_path: Path
+) -> dict[str, Any]:
+    """Start a dashboard that outlives the shell that asked for it."""
+    process = _detached_child(workspace, host=host, port=port, session_path=session_path)
+    deadline = time.monotonic() + DETACH_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        session = read_session(session_path)
+        if session is not None and session.get("pid") == process.pid:
+            return session
+        if process.poll() is not None:
+            break
+        time.sleep(0.1)
+    if process.poll() is None:
+        with contextlib.suppress(OSError):
+            process.kill()
+    log_path = session_path.with_name(f"{session_path.stem}.log")
+    raise RuntimeError(f"dashboard did not start; see {log_path}")
+
+
 def create_server(
     workspace: Path,
     *,
@@ -1354,22 +1540,138 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="open the dashboard in the default browser after binding",
     )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="serve in a background process that outlives this shell",
+    )
+    parser.add_argument(
+        "--restart",
+        action="store_true",
+        help="stop a dashboard already serving this workspace before starting",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="print the recorded dashboard for this workspace and exit",
+    )
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="stop the dashboard recorded for this workspace and exit",
+    )
+    parser.add_argument(
+        "--session-file",
+        type=Path,
+        help=f"where to record the running dashboard (default: {SESSION_RELATIVE})",
+    )
     args = parser.parse_args(argv)
-    server = create_server(args.workspace, host=args.host, port=args.port)
-    raw_host, port = server.server_address[:2]
-    host = raw_host.decode("ascii") if isinstance(raw_host, bytes) else raw_host
-    display_host = f"[{host}]" if ":" in host else host
-    scheme = "http"
-    url = f"{scheme}://{display_host}:{port}/#{server.access_token}"
-    print(f"Dashboard: {url}", flush=True)
-    if args.open:
-        webbrowser.open(url)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    if args.status and args.stop:
+        parser.error("--status and --stop cannot be combined")
+
+    workspace = args.workspace.expanduser().resolve()
+    session_path = session_file_for(workspace, args.session_file)
+
+    if args.status:
+        session = read_session(session_path)
+        live = session is not None and session_is_live(session_path)
+        print(
+            json.dumps(
+                {
+                    "running": live,
+                    "workspace": str(workspace),
+                    "session_file": str(session_path),
+                    **({"url": session["url"], "pid": session["pid"]} if live else {}),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return 0 if live else 1
+
+    if args.stop:
+        stopped = stop_session(session_path)
+        print("Dashboard stopped" if stopped else "No dashboard was running", flush=True)
+        return 0
+
+    existing = read_session(session_path)
+    if existing is not None and session_is_live(session_path):
+        if args.restart:
+            stop_session(session_path)
+        else:
+            url = str(existing["url"])
+            print(f"Dashboard: {url}", flush=True)
+            print("Reusing the dashboard already serving this workspace", flush=True)
+            if args.open:
+                webbrowser.open(url)
+            return 0
+
+    if args.detach:
+        session = start_detached(
+            workspace, host=args.host, port=args.port, session_path=session_path
+        )
+        url = str(session["url"])
+        print(f"Dashboard: {url}", flush=True)
+        print(f"Serving in the background as pid {session['pid']}", flush=True)
+        if args.open:
+            webbrowser.open(url)
+        return 0
+
+    with hold_session_lock(session_path) as lock:
+        if lock is None:
+            reused = read_session(session_path)
+            if reused is not None:
+                print(f"Dashboard: {reused['url']}", flush=True)
+                print("Reusing the dashboard already serving this workspace", flush=True)
+                return 0
+            print(
+                "another dashboard is already starting for this workspace",
+                file=sys.stderr,
+            )
+            return 1
+        server = create_server(workspace, host=args.host, port=args.port)
+        raw_host, port = server.server_address[:2]
+        host = raw_host.decode("ascii") if isinstance(raw_host, bytes) else raw_host
+        display_host = f"[{host}]" if ":" in host else host
+        scheme = "http"
+        url = f"{scheme}://{display_host}:{port}/#{server.access_token}"
+        write_session(
+            session_path,
+            {
+                "schema_version": SESSION_SCHEMA,
+                "workspace": str(workspace),
+                "fingerprint": server.workspace_fingerprint,
+                "host": host,
+                "port": port,
+                "pid": os.getpid(),
+                "token": server.access_token,
+                "url": url,
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
+        # A detached server is stopped with SIGTERM. Handle it so the recorded
+        # session is removed instead of being left behind. `shutdown` blocks
+        # until `serve_forever` returns, so it cannot run on the thread that is
+        # inside `serve_forever`.
+        with contextlib.suppress(ValueError, OSError, AttributeError):
+            signal.signal(
+                signal.SIGTERM,
+                lambda *_: threading.Thread(target=server.shutdown, daemon=True).start(),
+            )
+        print(f"Dashboard: {url}", flush=True)
+        if args.open:
+            webbrowser.open(url)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+            current = read_session(session_path)
+            if current is not None and current.get("pid") == os.getpid():
+                with contextlib.suppress(OSError):
+                    session_path.unlink()
     return 0
 
 

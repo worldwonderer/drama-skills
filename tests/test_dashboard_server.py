@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -1100,6 +1101,136 @@ class DashboardSectionVocabularyTests(unittest.TestCase):
                 self.assertIn(section, known)
 
 
+class DashboardSessionTests(unittest.TestCase):
+    """The dashboard has to outlive the shell that started it, and say so."""
+
+    def make_workspace(self, directory: str) -> Path:
+        workspace = Path(directory) / "workspace"
+        (workspace / "剧集").mkdir(parents=True)
+        (workspace / "short-drama.json").write_text(
+            json.dumps({"project_id": "SD-TEST", "title": "面板项目"}),
+            encoding="utf-8",
+        )
+        return workspace
+
+    def run_dashboard(self, *arguments: str) -> "subprocess.CompletedProcess[str]":
+        return subprocess.run(
+            [sys.executable, "-B", str(SCRIPT), *arguments],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+
+    def test_a_detached_dashboard_survives_its_launching_process(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = self.make_workspace(directory)
+            session_path = workspace / ".short-drama/dashboard.json"
+            started = self.run_dashboard(
+                "--workspace", str(workspace), "--port", "0", "--detach"
+            )
+            self.addCleanup(
+                self.run_dashboard, "--workspace", str(workspace), "--stop"
+            )
+            self.assertEqual(started.returncode, 0, started.stderr)
+            session = dashboard_server.read_session(session_path)
+            self.assertIsNotNone(session)
+            assert session is not None
+            self.assertNotEqual(session["pid"], os.getpid())
+            # The launching process is long gone; the server still holds its lock.
+            self.assertTrue(dashboard_server.session_is_live(session_path))
+            self.assertIn(session["url"], started.stdout)
+
+            status = self.run_dashboard("--workspace", str(workspace), "--status")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertEqual(json.loads(status.stdout)["url"], session["url"])
+
+            again = self.run_dashboard(
+                "--workspace", str(workspace), "--port", "0", "--detach"
+            )
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertIn(session["url"], again.stdout)
+            self.assertEqual(
+                dashboard_server.read_session(session_path)["pid"], session["pid"]
+            )
+
+            stopped = self.run_dashboard("--workspace", str(workspace), "--stop")
+            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            self.assertFalse(session_path.exists())
+            self.assertFalse(dashboard_server.session_is_live(session_path))
+
+    def test_status_reports_nothing_running_without_a_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = self.make_workspace(directory)
+            status = self.run_dashboard("--workspace", str(workspace), "--status")
+            self.assertEqual(status.returncode, 1)
+            payload = json.loads(status.stdout)
+            self.assertFalse(payload["running"])
+            self.assertNotIn("url", payload)
+
+    def test_the_session_file_is_only_readable_by_its_owner(self) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX permission bits do not apply on this platform")
+        with tempfile.TemporaryDirectory() as directory:
+            session_path = Path(directory) / ".short-drama/dashboard.json"
+            dashboard_server.write_session(
+                session_path,
+                {"schema_version": dashboard_server.SESSION_SCHEMA, "token": "secret"},
+            )
+            self.assertEqual(session_path.stat().st_mode & 0o777, 0o600)
+
+    def test_a_record_without_a_serving_process_is_not_live(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session_path = Path(directory) / ".short-drama/dashboard.json"
+            dashboard_server.write_session(
+                session_path,
+                {
+                    "schema_version": dashboard_server.SESSION_SCHEMA,
+                    "host": "127.0.0.1",
+                    "port": 8765,
+                    "fingerprint": "0" * 16,
+                    "token": "irrelevant",
+                    "url": "http://127.0.0.1:8765/#irrelevant",
+                    "pid": 999999,
+                },
+            )
+            self.assertIsNotNone(dashboard_server.read_session(session_path))
+            self.assertFalse(dashboard_server.session_is_live(session_path))
+
+    def test_liveness_follows_the_serving_lock_not_the_recorded_pid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session_path = Path(directory) / ".short-drama/dashboard.json"
+            with dashboard_server.hold_session_lock(session_path) as held:
+                self.assertIsNotNone(held)
+                self.assertTrue(dashboard_server.session_is_live(session_path))
+                with dashboard_server.hold_session_lock(session_path) as second:
+                    self.assertIsNone(second)
+            self.assertFalse(dashboard_server.session_is_live(session_path))
+
+    def test_each_workspace_has_its_own_serving_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            mine = Path(directory) / "a/.short-drama/dashboard.json"
+            theirs = Path(directory) / "b/.short-drama/dashboard.json"
+            with dashboard_server.hold_session_lock(mine) as held:
+                self.assertIsNotNone(held)
+                self.assertTrue(dashboard_server.session_is_live(mine))
+                self.assertFalse(dashboard_server.session_is_live(theirs))
+
+    def test_a_corrupt_or_foreign_session_file_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dashboard.json"
+            path.write_text("{not json", encoding="utf-8")
+            self.assertIsNone(dashboard_server.read_session(path))
+            path.write_text(json.dumps({"schema_version": "9.9"}), encoding="utf-8")
+            self.assertIsNone(dashboard_server.read_session(path))
+            path.write_text(
+                json.dumps({"schema_version": dashboard_server.SESSION_SCHEMA}),
+                encoding="utf-8",
+            )
+            self.assertIsNone(dashboard_server.read_session(path))
+
+
 class DashboardEntrypointTests(unittest.TestCase):
     def test_static_assets_and_project_tool_resolve_inside_installed_skill(
         self,
@@ -1353,6 +1484,10 @@ process.stdout.write(JSON.stringify(projected));
         class FakeServer:
             server_address = ("127.0.0.1", 43210)
             access_token = "test-capability"
+            workspace_fingerprint = "0123456789abcdef"
+
+            def shutdown(self) -> None:
+                pass
 
             def serve_forever(self) -> None:
                 raise KeyboardInterrupt

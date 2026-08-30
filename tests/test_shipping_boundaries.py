@@ -16,6 +16,7 @@ ALLOWED_PROVIDER_URLS = {
         "https://api.openai.com/v1",
         "https://ark.cn-beijing.volces.com/api/v3",
         "https://api.minimax.io/v1",
+        "https://api.minimax.io/v2",
     },
     "skills/short-drama-produce/references/providers/seedance.md": {
         "https://ark.cn-beijing.volces.com/api/v3",
@@ -30,6 +31,10 @@ ALLOWED_PROVIDER_URLS = {
     "skills/short-drama-produce/references/providers/minimax-music.md": {
         "https://api.minimax.io/v1",
         "https://platform.minimax.io/docs/api-reference/music-generation",
+    },
+    "skills/short-drama-produce/references/providers/minimax-h3-video.md": {
+        "https://api.minimax.io/v2",
+        "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
     },
 }
 RELEASE_TEXT_SUFFIXES = {

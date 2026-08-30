@@ -13,6 +13,58 @@
 
 ## [Unreleased]
 
+### Added
+
+**`project_tool.py export`**：把每集现有的五份创作文档与 `剧集/<EP>/制作成果/` 复制成一份交付
+目录，附 `manifest.json` 与 `checksums.sha256`，排除 `输入/`、`交付/` 与 `.short-drama/`。
+支持 `--episode`（可重复）、`--no-media` 与 `--overwrite`；`--out` 必须在项目之外。这是**当前
+状态快照**，manifest 的 `asserts_approval` 恒为 `false`，不声称任何审查或创作者接受；带审批证据
+的正式交付包仍然只有 `package` / `verify`。此前创作者跑完全流程后没有可用的导出命令：`package`
+要求每个文件都走过 publish → review → accept，creator-first 项目并不产生这些记录。
+
+**Dashboard 可以脱离启动它的 shell 常驻**。`dashboard_server.py` 新增 `--detach`、`--status`、
+`--stop` 与 `--restart`。此前服务进程是启动它的 shell 的子进程，会话结束就一起没了，创作者要反复
+重开、每次拿到一个新链接。现在 `--detach` 让它在自己的进程组里运行，运行中的地址、端口与 pid
+记录在 `<workspace>/.short-drama/dashboard.json`（0600），日志在同目录 `dashboard.log`；
+`--status` 重新打印当前链接，`--stop` 停止并清除记录。同一 workspace 已有在跑的实例时，再次启动
+只打印同一个链接，不再开第二个端口。是否在跑由一把服务锁回答，不靠探测端口——Dashboard 仍然
+不含任何对外网络客户端。不加这些参数时行为不变。
+
+**目标模型能力档案**。`$short-drama-video-prompts` 新增一份参考资料，把“按目标模型确认”落成六条
+有限的能力轴：单次原生时长、参考条件方式、声音是否与画面同轨生成、画幅与分辨率、正文长度上限、
+运镜词汇。取值由创作者声明，套件不内置任何模型清单或供应商名称；未声明时按自足的中性写法写，
+未声明不作为审查阻断理由。
+
+**MiniMax H3 视频 adapter**。`$short-drama-produce` 增加第四个可选 stdlib adapter
+（`minimax-h3`）：模型 ID、分辨率集合与时长区间必须由账号显式配置，提示词进 `content` 的 text 项
+并按 7000 字符上限拒绝，参考图按显式 `first_frame` / `last_frame` / `reference_*` role 绑定，
+文生视频必须给出具体画幅（拒绝 `adaptive`），本地参考在没有可信上传时 fail closed。
+
+### Changed
+
+**跨镜一致性锁**（`CON-07` 资产 / 分镜 / 视频提示词，`IMG-13` 图片提示词，均为
+`structural_invariant`）。`视觉设定.md` 现在可以给一个可见事实写一条 `连续性锁`，把跨镜不变的
+那一小段字（颜色、材质、形制）连同生效镜头一起固定下来：
+
+```markdown
+- 连续性锁：LOCK-KNIT《织了一半的毛衣》（镜头：全集；图片提示词项：IMG-PROP-KNIT）· 锁面：pale blue chunky knit wool sweater
+```
+
+生效范围内的冻结关键帧、`MOTION-...` 正文和被点名的 `IMG-...` 正文都必须含有这段锁面，
+`creator_markdown_check.py` 会机械核对（忽略大小写）。此前只有给创作者读的「识别锚点」，执行端
+读不到它：视觉设定写了毛衣是浅蓝色，第一镜生成蓝色、第二镜生成红色，而每一条提示词单看都成立，
+所以文字审查抓不到。图生视频“参考帧已经交代过就删掉重复描述”是常规做法，锁面是它写明的例外。
+
+写法、什么值得上锁与反例见
+[跨镜一致性锁](skills/short-drama-assets/references/continuity-lock.md)。
+
+*升级*：没有声明任何锁的项目行为不变，既有产物不受影响。声明一条锁后，生效范围内缺锁面的
+关键帧或运动正文会被校验器指出来——那正是它要抓的漂移。
+
+**`VID-23`**（`reviewed_invariant`）。目标执行端与画面同轨生成声音时，本镜不要的声音必须写进
+可复制正文——没写出来的通道不会安静，会被执行端用自己发明的配乐和台词填满，和没写终点的动作
+会被自己发明的动作填满是同一件事。执行端不同轨或未声明时，这一条不适用。
+
 ### Fixed
 
 **Windows 上的参考图不再被截断**。生产环节按描述符读参考图时缺 `O_BINARY`，Windows 因此按文本
