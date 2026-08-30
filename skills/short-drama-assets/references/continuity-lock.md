@@ -57,9 +57,10 @@ sweater`），但不能改写锁面内部——少一个 `stand-collar`、多一
 - **粘在词上的匹配不算**。锁面首尾是字母数字时，紧挨着的字母数字或连字符会让它落空：
   `chipped white enamel mug` 不被 `unchipped white enamel mug` 满足，
   `pale blue knit` 不被 `pale blue knitwear-print fleece` 满足。锁面要能作为一个完整的词组读出来。
-- **负面提示词里的匹配不算**。写在 `no`、`without`、`不要`、`避免` 之后的锁面说的是「不要出现
-  它」，正好与锁的目的相反；`..., no pale blue chunky knit wool sweater` 不能作为锁面在场的证据。
-  锁面必须出现在描述画面内容的正文里。
+- **负面提示词里的匹配不算**。写在 `no`/`not`/`without`/`avoid` 或 `不要`/`不能`/`没有`/`避免`
+  之后的锁面说的是「不要出现它」，正好与锁的目的相反；`..., no pale blue chunky knit wool
+  sweater` 不能作为锁面在场的证据。锁面必须出现在描述画面内容的正文里。
+  「粘在词上」只对 ASCII 词生效——中文本来不分词，`织着浅蓝色粗棒针毛线` 正常命中。
 
 ## 语法
 

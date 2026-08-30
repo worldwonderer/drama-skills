@@ -693,6 +693,46 @@ class CreatorFirstGoldenTests(unittest.TestCase):
                 errors = creator_markdown_check.validate_episode(episode, project)
                 self.assertTrue(any(expected in error for error in errors), errors)
 
+    def test_a_lock_surface_counts_only_when_the_prompt_asserts_it(self) -> None:
+        """The surface has to name what is in the picture.
+
+        Plain containment answers "do these bytes occur", which both an affix and
+        a negative prompt defeat while looking like a pass. Chinese has no word
+        boundaries, so the boundary rule applies to ASCII words only -- otherwise
+        a Chinese surface could never be satisfied at all.
+        """
+        carries = creator_markdown_check._carries_surface
+        english = "pale blue chunky knit wool sweater"
+        chinese = "浅蓝色粗棒针毛线"
+        for prompt, surface, expected in (
+            (f"a mother knitting a {english} on bamboo needles", english, True),
+            (f"the {english}, half finished.", english, True),
+            (f"wearing no jewelry and a {english}", english, True),
+            (f"..., no text, no logo. A {english} rests on the sofa", english, True),
+            # one physical line break inside the rendered paragraph
+            ("A pale blue chunky knit wool\nsweater, half finished", english, True),
+            (f"a warm red cardigan, no {english}, no text", english, False),
+            (f"without a {english}", english, False),
+            ("a pristine unchipped white enamel mug", "chipped white enamel mug", False),
+            ("the chipped white enamel mug", "chipped white enamel mug", True),
+            (
+                "a fake-olive-green stand-collar service dress",
+                "olive-green stand-collar service dress",
+                False,
+            ),
+            (
+                "olive-green stand-collar service dressing-gown",
+                "olive-green stand-collar service dress",
+                False,
+            ),
+            (f"妈妈织着{chinese}，孩子在旁边看书", chinese, True),
+            (f"她穿着无袖的{chinese}背心", chinese, True),
+            (f"画面里是暗红色开衫，不要{chinese}", chinese, False),
+            (f"镜头里没有{chinese}", chinese, False),
+        ):
+            with self.subTest(surface=surface, prompt=prompt[:40]):
+                self.assertEqual(carries(prompt, surface), expected)
+
     def test_a_lock_written_with_any_list_marker_still_enforces(self) -> None:
         """A lock must never become a no-op because of how its bullet is typed.
 

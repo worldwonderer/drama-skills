@@ -49,9 +49,15 @@ LOCK_RE = re.compile(
 # The surface has to name what is in the picture. A match glued to a negation
 # ("no pale blue sweater") describes what must be absent, so it cannot be the
 # evidence that the fact is present.
+# Chinese runs without spaces, so the CJK markers cannot require a preceding
+# boundary the way the English ones do. A bare 无 is deliberately not a marker:
+# 无袖毛衣 describes the garment rather than excluding it.
 NEGATION_RE = re.compile(
-    r"(?:^|[\s,;:(\[/—-])(?:no|not|non|never|without|avoid|exclude|excluding|"
-    r"free\s+of|--?no|不要|不得|不能|没有|避免|禁止|无)[\s-]*$",
+    r"(?:"
+    r"(?:^|[\s,;:(\[/—-])(?:no|not|non|never|without|avoid|excludes?|excluding|"
+    r"free\s+of|--?no)(?:\s+(?:a|an|the|any|some))?[\s-]*"
+    r"|(?:不要|不得|不能|不出现|没有|避免|禁止|排除)[\s]*"
+    r")$",
     re.IGNORECASE,
 )
 
@@ -213,6 +219,12 @@ def _normalized(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().casefold()
 
 
+def _wordish(character: str) -> bool:
+    return bool(character) and character.isascii() and (
+        character.isalnum() or character == "-"
+    )
+
+
 def _carries_surface(prompt: str, surface: str) -> bool:
     """Is this lock surface actually asserted by this prompt?
 
@@ -229,9 +241,12 @@ def _carries_surface(prompt: str, surface: str) -> bool:
         end = start + len(needle)
         before = haystack[start - 1] if start else ""
         after = haystack[end] if end < len(haystack) else ""
+        # Only ASCII words have boundaries to glue across. Chinese is written
+        # without spaces, so treating an adjacent CJK character as "glued" would
+        # make a Chinese surface impossible to satisfy.
         glued = (
-            (needle[:1].isalnum() and (before.isalnum() or before == "-"))
-            or (needle[-1:].isalnum() and (after.isalnum() or after == "-"))
+            (_wordish(needle[:1]) and _wordish(before))
+            or (_wordish(needle[-1:]) and _wordish(after))
         )
         if not glued and NEGATION_RE.search(haystack[:start]) is None:
             return True
