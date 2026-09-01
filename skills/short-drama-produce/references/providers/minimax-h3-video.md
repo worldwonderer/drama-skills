@@ -36,7 +36,13 @@ The prompt is compiled into one `text` item of the multimodal `content` array an
 `role`: `first_frame`, `last_frame`, `reference_image`, `reference_video`, or `reference_audio`.
 Set the job's `parameters.prompt_language` to the resolved video-prompt language; the compiler
 consumes it when appending reference semantics and does not send it as a MiniMax request field.
-`first_frame` and `last_frame` may each appear once. Reference URLs must be HTTPS or `mm_file://`;
+`first_frame` and `last_frame` may each appear once.
+frame conditioning (`first_frame` / `last_frame`) and full-reference conditioning
+(`reference_image` / `reference_video` / `reference_audio`) are mutually exclusive in one request.
+For continuation, bind the previous actual video as `reference_video` and its actual tail as
+`reference_image`; the compiler labels them `<Video 1>` and `<Picture 1>` in its appended contract.
+Never relabel that tail as `first_frame` while a reference video is present. Reference URLs must be
+HTTPS or `mm_file://`;
 local references fail closed, exactly as for Seedance, because the public contract does not prove
 that a local data URL is accepted. A deployment that needs image-to-video must add an external,
 authorized upload step and call `compile_minimax_h3_payload` with the resulting URI; do not put a
@@ -48,7 +54,13 @@ status fails closed.
 
 ## What this model changes for the prompt itself
 
-This release generates audio in the same pass as the picture. That is a **capability**, not a style:
+This release generates audio in the same pass as the picture. Its direct prompt dialect is also
+structured: base/first-frame/first-last-frame tasks use `integrated_multimodal_description`,
+`overall_soundscape`, and `non_diegetic_music`; full-reference tasks use the six-section H3 reference
+form. Chinese dialogue remains exact inside `<d>[Chinese] ...</d>`. Full details live in the
+video-prompt skill's `references/minimax-h3.md`.
+
+Audio generation is a **capability**, not a style:
 what changes upstream is only which axes of the target-model profile a project declares — see the
 video-prompt skill's target-model profile. Two consequences are worth stating here because they
 show up as production defects rather than as API errors:

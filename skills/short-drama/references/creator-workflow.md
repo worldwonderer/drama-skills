@@ -24,7 +24,8 @@
 补造并行结构化产物。
 
 创作者说明跟随项目语言。图片和关键帧正文跟随 `prompt_language`；视频正文优先跟随目标视频模型
-档案的 `video_prompt_language`，未声明时回退 `prompt_language`。没有 `short-drama.json` 时，图片与
+档案的 `video_prompt_language` 和 `video_prompt_dialect`，未声明时回退 `prompt_language` 与通用自然语言。
+`native_duration_seconds` 在分镜规划时生效，不能等生产提交才发现镜头不合法。没有 `short-drama.json` 时，图片与
 关键帧正文默认使用 `en`；视频正文根据目标模型确认，目标也未声明时沿用用户当前语言。描述语言、
 对白口语语言和画内文字互相独立，不能用一个推断另一个。
 

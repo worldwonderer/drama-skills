@@ -80,7 +80,9 @@ python3 <本技能目录>/scripts/production_tool.py audit <project>
 - **video**：读取 `视频提示词.md` 的当前 `MOTION-*` 可复制正文，并核对 `分镜.md` 中对应镜头、
   冻结关键帧、时长与画幅；creator-first job 使用 `source_entry` 锁定这一条。连续段选择从上一段
   生成结果续接时，下一段 job 同时绑定上一段实际视频和从该视频取得的实际尾帧，并保留
-  `continuity_video`、`actual_tail_frame` 的不同职责；不以计划尾帧或文字描述代替真实文件。
+  `continuity_video`、`actual_tail_frame` 的不同职责；供应商 role 由目标模型 adapter 翻译。H3 的这组
+  输入统一译为 `reference_video + reference_image`，不能混成 `reference_video + first_frame`；不以
+  计划尾帧或文字描述代替真实文件。
 - **tts**：从 `剧本.md` 读取原句与表演要求，声音参考由用户或现有媒体明确提供。不得在生产 job
   中改词，也不为 TTS 新建第六份创作文档。
 - **music**：读取 `视频提示词.md` 中创作者已确认的时间线音乐章节；主题曲使用已确认歌词，纯配乐
@@ -105,8 +107,8 @@ adapter 配置必须在项目外，只包含 argv 命令和超时；凭据由 ad
 
 本技能可选提供四个 stdlib adapter，均通过项目外 adapter config 选择，凭据只从运行环境读取：
 
-- [Seedance](references/providers/seedance.md)：模型/Endpoint ID 必须由账号显式配置；内置 runtime
-  只承诺已验证的 text-to-video，未配置可信上传时本地参考图 fail closed。
+- [Seedance](references/providers/seedance.md)：模型/Endpoint ID 必须由账号显式配置；compiler 支持
+  官方图片、视频和音频参考 role，内置 runtime 未配置可信上传时仍拒绝本地参考文件。
 - [GPT Image 2](references/providers/gpt-image-2.md)：无参考图走 generation，有参考图走 edit；
   固定高保真引用并校验尺寸、格式与透明背景限制。
 - [MiniMax Music](references/providers/minimax-music.md)：使用 `music-3.0` 与 hex 结果，区分主题曲

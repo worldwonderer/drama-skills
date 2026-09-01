@@ -73,16 +73,13 @@ class ProviderCompilerTests(unittest.TestCase):
                 "content": [
                     {
                         "type": "text",
-                        "text": (
-                            "slow push in as the evidence is revealed "
-                            "--ratio 9:16 --dur 5"
-                        ),
+                        "text": "slow push in as the evidence is revealed",
                     }
                 ],
+                "ratio": "9:16",
+                "duration": 5,
             },
         )
-        self.assertNotIn("duration", payload)
-        self.assertNotIn("ratio", payload)
 
     def test_seedance_fails_closed_on_unproven_or_unsafe_inputs(self) -> None:
         with self.assertRaisesRegex(ValueError, "explicitly configured"):
@@ -105,11 +102,13 @@ class ProviderCompilerTests(unittest.TestCase):
                 referenced,
                 model="configured",
                 reference_urls=["data:image/png;base64,AAAA"],
+                reference_roles=["reference_image"],
             )
         payload = provider_adapters.compile_seedance_payload(
             referenced,
             model="configured",
             reference_urls=["asset://asset-202608160001-example"],
+            reference_roles=["reference_image"],
         )
         self.assertEqual(payload["content"][1]["role"], "reference_image")
         adaptive = provider_adapters.compile_seedance_payload(
@@ -117,7 +116,7 @@ class ProviderCompilerTests(unittest.TestCase):
             model="configured",
             allowed_ratios={"adaptive"},
         )
-        self.assertTrue(adaptive["content"][0]["text"].endswith("--ratio adaptive"))
+        self.assertEqual(adaptive["ratio"], "adaptive")
 
     def test_provider_prompts_preserve_confirmed_reference_semantics(self) -> None:
         video = self.video_job()
@@ -127,9 +126,10 @@ class ProviderCompilerTests(unittest.TestCase):
             video,
             model="configured",
             reference_urls=["asset://asset-202608160001-example"],
+            reference_roles=["reference_image"],
         )
         text = seedance["content"][0]["text"]
-        self.assertIn("Reference 1 (女主定妆照), role identity", text)
+        self.assertIn("Reference @图片1 (女主定妆照), role identity", text)
         self.assertIn("May control: 脸型, 发型", text)
         self.assertIn("Must not control: 构图, 动作", text)
 
@@ -144,7 +144,7 @@ class ProviderCompilerTests(unittest.TestCase):
         video = self.video_job(
             duration=6,
             resolution="768P",
-            prompt_language="zh-CN",
+            prompt_language="en",
         )
         video["references"] = ["输入/previous.mp4", "输入/previous-tail.png"]
         video["reference_bindings"] = [
@@ -170,18 +170,107 @@ class ProviderCompilerTests(unittest.TestCase):
                 "https://media.example/previous.mp4",
                 "https://media.example/previous-tail.png",
             ],
-            reference_roles=["reference_video", "first_frame"],
+            reference_roles=["reference_video", "reference_image"],
             allowed_resolutions={"768P"},
             duration_range=(6, 6),
         )
         text = payload["content"][0]["text"]
-        self.assertIn("参考约束：", text)
-        self.assertIn("参考 1（上一段实际视频），用途 continuity_video", text)
-        self.assertIn("参考 2（实际尾帧），用途 actual_tail_frame", text)
-        self.assertNotIn("Reference image", text)
+        self.assertIn("Reference contract:", text)
+        self.assertIn("Reference <Video 1> (上一段实际视频), role continuity_video", text)
+        self.assertIn("Reference <Picture 1> (实际尾帧), role actual_tail_frame", text)
         self.assertNotIn("prompt_language", payload)
         self.assertEqual(payload["content"][1]["type"], "video_url")
         self.assertEqual(payload["content"][2]["type"], "image_url")
+
+    def test_seedance_2_5_task_types_compile_their_distinct_contracts(self) -> None:
+        video = self.video_job(
+            duration=20,
+            ratio="9:16",
+            generate_audio=True,
+            omni_reference_task_type="reference",
+            prompt_language="zh-CN",
+        )
+        video["references"] = ["输入/look.png"]
+        video["reference_bindings"] = [
+            {**self.reference_binding(), "path": "输入/look.png"}
+        ]
+        reference = provider_adapters.compile_seedance_payload(
+            video,
+            model="doubao-seedance-2-5-260628",
+            reference_urls=["https://media.example/look.png"],
+            reference_roles=["reference_image"],
+            allowed_ratios={"9:16"},
+            duration_range=(4, 30),
+        )
+        self.assertEqual(reference["duration"], 20)
+        self.assertTrue(reference["generate_audio"])
+        self.assertEqual(reference["omni_reference_task_type"], "reference")
+        self.assertIn("参考 @图片1", reference["content"][0]["text"])
+
+        edit = self.video_job(
+            duration=-1,
+            ratio="adaptive",
+            omni_reference_task_type="edit",
+        )
+        edit["references"] = ["输入/source.mp4"]
+        compiled_edit = provider_adapters.compile_seedance_payload(
+            edit,
+            model="doubao-seedance-2-5-260628",
+            reference_urls=["https://media.example/source.mp4"],
+            reference_roles=["reference_video"],
+            allowed_ratios={"adaptive"},
+        )
+        self.assertEqual(compiled_edit["duration"], -1)
+        with self.assertRaisesRegex(ValueError, "adaptive ratio and duration -1"):
+            provider_adapters.compile_seedance_payload(
+                {**edit, "parameters": {**edit["parameters"], "duration": 8}},
+                model="doubao-seedance-2-5-260628",
+                reference_urls=["https://media.example/source.mp4"],
+                reference_roles=["reference_video"],
+                allowed_ratios={"adaptive"},
+                duration_range=(4, 30),
+            )
+
+        extend = self.video_job(
+            duration=5,
+            ratio="adaptive",
+            omni_reference_task_type="extend",
+            prompt_language="zh-CN",
+        )
+        extend["references"] = ["输入/previous.mp4", "输入/tail.png"]
+        extend["reference_bindings"] = [
+            {
+                **self.reference_binding(),
+                "path": "输入/previous.mp4",
+                "label": "上一段实际视频",
+                "role": "continuity_video",
+            },
+            {
+                **self.reference_binding(),
+                "slot_id": "REF-TAIL",
+                "order": 2,
+                "path": "输入/tail.png",
+                "label": "实际尾帧",
+                "role": "actual_tail_frame",
+            },
+        ]
+        compiled_extend = provider_adapters.compile_seedance_payload(
+            extend,
+            model="doubao-seedance-2-5-260628",
+            reference_urls=[
+                "https://media.example/previous.mp4",
+                "https://media.example/tail.png",
+            ],
+            reference_roles=["reference_video", "reference_image"],
+            allowed_ratios={"adaptive"},
+            duration_range=(4, 30),
+        )
+        extend_text = compiled_extend["content"][0]["text"]
+        self.assertIn("输入素材 @视频1（上一段实际视频）", extend_text)
+        self.assertIn("输入素材 @图片1（实际尾帧）", extend_text)
+        self.assertNotIn("参考 @视频1", extend_text)
+        self.assertEqual(compiled_extend["content"][1]["type"], "video_url")
+        self.assertEqual(compiled_extend["content"][2]["type"], "image_url")
 
     def test_provider_rejects_reference_semantics_that_do_not_match_paths(self) -> None:
         image = self.image_job()
@@ -385,6 +474,22 @@ class ProviderCompilerTests(unittest.TestCase):
                 **self.minimax_video_profile(),
             )
 
+    def test_minimax_h3_rejects_mixed_frame_and_reference_modes(self) -> None:
+        job = {
+            **self.video_job(duration=6, resolution="768P"),
+            "references": ["输入/previous.mp4", "输入/tail.png"],
+        }
+        with self.assertRaisesRegex(ValueError, "cannot be mixed"):
+            provider_adapters.compile_minimax_h3_payload(
+                job,
+                model="m",
+                reference_urls=[
+                    "https://media.example/previous.mp4",
+                    "https://media.example/tail.png",
+                ],
+                reference_roles=["reference_video", "first_frame"],
+                **self.minimax_video_profile(),
+            )
     def test_minimax_h3_refuses_a_prompt_beyond_the_provider_limit(self) -> None:
         long_job = {
             **self.video_job(duration=6, ratio="9:16", resolution="768P"),

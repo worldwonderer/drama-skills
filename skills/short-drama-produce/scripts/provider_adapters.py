@@ -40,6 +40,11 @@ MAX_MULTIPART_BYTES = 200 * 1024 * 1024
 MAX_ERROR_BODY_BYTES = 64 * 1024
 TERMINAL_FAILURES = {"failed", "cancelled", "canceled", "timeout", "expired"}
 SEEDANCE_RATIOS = {"adaptive", "1:1", "3:4", "4:3", "9:16", "16:9", "21:9"}
+SEEDANCE_REFERENCE_ROLES = {
+    "reference_image": "image_url",
+    "reference_video": "video_url",
+    "reference_audio": "audio_url",
+}
 MINIMAX_VIDEO_RATIOS = {"adaptive", "1:1", "3:4", "4:3", "9:16", "16:9", "21:9"}
 MINIMAX_VIDEO_RESOLUTIONS = {"480P", "768P", "2K"}
 MINIMAX_VIDEO_PROMPT_LIMIT = 7000
@@ -177,6 +182,9 @@ def _prompt_with_reference_contract(
     job: Mapping[str, Any],
     *,
     prompt_language: str | None = None,
+    reference_tokens: Sequence[str] = (),
+    zh_reference_prefix: str = "参考",
+    zh_heading: str = "参考约束：",
 ) -> str:
     bindings = job.get("reference_bindings", [])
     references = job.get("references", [])
@@ -188,6 +196,8 @@ def _prompt_with_reference_contract(
         or len(bindings) != len(references)
     ):
         raise ValueError("reference bindings must match job references")
+    if reference_tokens and len(reference_tokens) != len(references):
+        raise ValueError("reference tokens must match job references")
     language = (prompt_language or "en").casefold()
     instructions: list[str] = []
     for index, binding in enumerate(bindings, 1):
@@ -214,6 +224,7 @@ def _prompt_with_reference_contract(
             raise ValueError("reference binding semantics are invalid")
         values = {
             "order": index,
+            "reference": reference_tokens[index - 1] if reference_tokens else str(index),
             "label": label.strip(),
             "role": role.strip(),
             "may": ", ".join(item.strip() for item in may_control),
@@ -221,12 +232,15 @@ def _prompt_with_reference_contract(
         }
         if language.startswith("zh"):
             instructions.append(
-                "参考 {order}（{label}），用途 {role}。允许控制：{may}。"
-                "不得控制：{must}。".format(**values)
+                f"{zh_reference_prefix} "
+                + (
+                    "{reference}（{label}），用途 {role}。允许控制：{may}。"
+                    "不得控制：{must}。".format(**values)
+                )
             )
         elif language.startswith("en"):
             instructions.append(
-                "Reference {order} ({label}), role {role}. May control: {may}. "
+                "Reference {reference} ({label}), role {role}. May control: {may}. "
                 "Must not control: {must}.".format(**values)
             )
         else:
@@ -236,7 +250,7 @@ def _prompt_with_reference_contract(
                 )
             )
     if language.startswith("zh"):
-        heading = "参考约束："
+        heading = zh_heading
     elif language.startswith("en"):
         heading = "Reference contract:"
     else:
@@ -265,6 +279,7 @@ def compile_seedance_payload(
     *,
     model: str,
     reference_urls: Sequence[str] = (),
+    reference_roles: Sequence[str] = (),
     allowed_ratios: Collection[str] | None = None,
     duration_range: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
@@ -279,25 +294,33 @@ def compile_seedance_payload(
     references = job.get("references", [])
     if not isinstance(references, list) or len(reference_urls) != len(references):
         raise ValueError("Seedance reference URLs must match job references")
+    if len(reference_roles) != len(reference_urls):
+        raise ValueError("Seedance reference roles must match job references")
     if Path(job["outputs"][0]).suffix.casefold() != ".mp4":
         raise ValueError("Seedance adapter requires an MP4 target")
     parameters = _take(
         parameters,
-        {"duration", "ratio", "prompt_language"},
+        {
+            "duration",
+            "ratio",
+            "generate_audio",
+            "omni_reference_task_type",
+            "prompt_language",
+        },
     )
     prompt_language = _pop_prompt_language(parameters)
     duration = parameters.get("duration")
     if duration is not None and (
         not isinstance(duration, int)
         or isinstance(duration, bool)
-        or not 1 <= duration <= 15
+        or (duration != -1 and not 1 <= duration <= 30)
     ):
-        raise ValueError("Seedance duration must be an integer from 1 to 15")
-    if duration is not None:
+        raise ValueError("Seedance duration must be -1 or an integer from 1 to 30")
+    if duration is not None and duration != -1:
         if duration_range is None:
             raise ValueError("Seedance duration needs an explicit model profile")
         minimum, maximum = duration_range
-        if not 1 <= minimum <= maximum <= 15 or not minimum <= duration <= maximum:
+        if not 1 <= minimum <= maximum <= 30 or not minimum <= duration <= maximum:
             raise ValueError("Seedance duration is outside the configured model profile")
     ratio = parameters.get("ratio")
     if ratio is not None and (
@@ -310,40 +333,75 @@ def compile_seedance_payload(
             raise ValueError("Seedance ratio needs an explicit model profile")
         if not configured_ratios <= SEEDANCE_RATIOS or ratio.strip() not in configured_ratios:
             raise ValueError("Seedance ratio is outside the configured model profile")
+        ratio = ratio.strip()
+    generate_audio = parameters.get("generate_audio")
+    if generate_audio is not None and not isinstance(generate_audio, bool):
+        raise ValueError("Seedance generate_audio must be a boolean")
+    task_type = parameters.get("omni_reference_task_type")
+    if task_type is not None and task_type not in {"auto", "reference", "edit", "extend"}:
+        raise ValueError("Seedance omni reference task type is invalid")
+    counters = {"image_url": 0, "video_url": 0, "audio_url": 0}
+    labels = {"image_url": "图片", "video_url": "视频", "audio_url": "音频"}
+    reference_tokens: list[str] = []
+    for role in reference_roles:
+        field = SEEDANCE_REFERENCE_ROLES.get(role)
+        if field is None:
+            raise ValueError(f"unsupported Seedance reference role: {role}")
+        counters[field] += 1
+        reference_tokens.append(f"@{labels[field]}{counters[field]}")
+    if task_type in {"edit", "extend"} and "reference_video" not in reference_roles:
+        raise ValueError(f"Seedance {task_type} requires a reference video")
+    if task_type == "edit" and (ratio != "adaptive" or duration != -1):
+        raise ValueError("Seedance edit requires adaptive ratio and duration -1")
+    if task_type == "extend" and ratio != "adaptive":
+        raise ValueError("Seedance extend requires an adaptive ratio")
     text = _prompt_with_reference_contract(
-        prompt, job, prompt_language=prompt_language
+        prompt,
+        job,
+        prompt_language=prompt_language,
+        reference_tokens=reference_tokens,
+        zh_reference_prefix=(
+            "输入素材" if task_type in {"edit", "extend"} else "参考"
+        ),
+        zh_heading=(
+            "输入素材约束：" if task_type in {"edit", "extend"} else "参考约束："
+        ),
     )
-    if ratio is not None:
-        text += f" --ratio {ratio.strip()}"
-    if duration is not None:
-        text += f" --dur {duration}"
     content: list[dict[str, Any]] = [{"type": "text", "text": text}]
     for index, url in enumerate(reference_urls):
         if not isinstance(url, str) or not url:
             raise ValueError("Seedance reference URL must be non-empty")
+        role = reference_roles[index]
+        field = SEEDANCE_REFERENCE_ROLES[role]
         suffix = Path(str(references[index])).suffix.casefold()
-        if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-            parsed = urllib.parse.urlparse(url)
-            if (
-                parsed.scheme == "https" and parsed.netloc
-            ) or (
+        expected = {
+            "image_url": {".png", ".jpg", ".jpeg", ".webp"},
+            "video_url": {".mp4", ".mov", ".webm"},
+            "audio_url": {".wav", ".mp3", ".m4a", ".aac", ".flac"},
+        }[field]
+        if suffix not in expected:
+            raise ValueError(f"Seedance {role} does not match the reference file type")
+        parsed = urllib.parse.urlparse(url)
+        if not (
+            (parsed.scheme == "https" and parsed.netloc)
+            or (
                 parsed.scheme == "asset"
                 and parsed.netloc.startswith("asset-")
                 and not parsed.path
-            ):
-                pass
-            else:
-                raise ValueError("Seedance reference URL must be HTTPS or asset://")
-            content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": url},
-                    "role": "reference_image",
-                }
             )
-        else:
-            raise ValueError("Seedance adapter accepts image references only")
-    return {"model": model.strip(), "content": content}
+        ):
+            raise ValueError("Seedance reference URL must be HTTPS or asset://")
+        content.append({"type": field, field: {"url": url}, "role": role})
+    body: dict[str, Any] = {"model": model.strip(), "content": content}
+    if ratio is not None:
+        body["ratio"] = ratio
+    if duration is not None:
+        body["duration"] = duration
+    if generate_audio is not None:
+        body["generate_audio"] = generate_audio
+    if task_type is not None:
+        body["omni_reference_task_type"] = task_type
+    return body
 
 
 def _seedance_runtime_profile(
@@ -383,7 +441,7 @@ def _seedance_runtime_profile(
             code="invalid_model_profile",
         )
     if duration_range is not None and not (
-        1 <= duration_range[0] <= duration_range[1] <= 15
+        1 <= duration_range[0] <= duration_range[1] <= 30
     ):
         raise AdapterFailure(
             "Seedance duration profile is invalid",
@@ -458,8 +516,20 @@ def compile_minimax_h3_payload(
         ):
             raise ValueError("MiniMax video ratio is outside the configured model profile")
 
+    counters = {"image_url": 0, "video_url": 0, "audio_url": 0}
+    labels = {"image_url": "Picture", "video_url": "Video", "audio_url": "Audio"}
+    reference_tokens: list[str] = []
+    for role in reference_roles:
+        field = MINIMAX_VIDEO_ROLES.get(role)
+        if field is None:
+            raise ValueError(f"unsupported MiniMax reference role: {role}")
+        counters[field] += 1
+        reference_tokens.append(f"<{labels[field]} {counters[field]}>")
     text = _prompt_with_reference_contract(
-        prompt, job, prompt_language=prompt_language
+        prompt,
+        job,
+        prompt_language=prompt_language,
+        reference_tokens=reference_tokens,
     )
     if len(text) > MINIMAX_VIDEO_PROMPT_LIMIT:
         raise ValueError("MiniMax video prompt exceeds the provider limit")
@@ -482,6 +552,14 @@ def compile_minimax_h3_payload(
             raise ValueError("MiniMax reference URL must be HTTPS or mm_file://")
         field = MINIMAX_VIDEO_ROLES[role]
         content.append({"type": field, field: {"url": url}, "role": role})
+    frame_roles = {"first_frame", "last_frame"}
+    reference_roles_present = {"reference_image", "reference_video", "reference_audio"}
+    if frame_roles.intersection(seen_roles) and reference_roles_present.intersection(
+        seen_roles
+    ):
+        raise ValueError(
+            "MiniMax frame conditioning cannot be mixed with reference conditioning"
+        )
     if ratio is None and len(content) == 1:
         raise ValueError("MiniMax text-to-video requires an explicit ratio")
     body: dict[str, Any] = {
@@ -1224,8 +1302,8 @@ def _selftest() -> None:
     )
     if seedance["model"] != "configured-model":
         raise RuntimeError("Seedance model self-test failed")
-    if not seedance["content"][0]["text"].endswith("--ratio 9:16 --dur 5"):
-        raise RuntimeError("Seedance prompt switch self-test failed")
+    if seedance.get("ratio") != "9:16" or seedance.get("duration") != 5:
+        raise RuntimeError("Seedance parameter self-test failed")
     minimax_video = compile_minimax_h3_payload(
         {**video, "parameters": {"duration": 6, "ratio": "9:16", "resolution": "768P"}},
         model="configured-video-model",
@@ -1270,11 +1348,12 @@ def _selftest() -> None:
             invalid_reference,
             model="configured-model",
             reference_urls=["asset://asset-example-clip"],
+            reference_roles=["reference_image"],
         )
     except ValueError:
         pass
     else:
-        raise AssertionError("non-image Seedance reference was accepted")
+        raise AssertionError("mismatched Seedance reference role was accepted")
 
 
 def main() -> int:

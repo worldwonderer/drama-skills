@@ -97,8 +97,7 @@ def main() -> int:
         == "gpt-image-2",
         "GPT Image 2 profile compiled the wrong model",
     )
-    require(
-        compile_seedance_payload(
+    seedance = compile_seedance_payload(
         {
             "modality": "video",
             "prompt": "slow push in",
@@ -109,8 +108,10 @@ def main() -> int:
         model="configured-endpoint",
         allowed_ratios={"9:16"},
         duration_range=(5, 10),
-        )["content"][0]["text"].endswith("--ratio 9:16 --dur 5"),
-        "Seedance profile did not compile explicit prompt switches",
+    )
+    require(
+        seedance.get("ratio") == "9:16" and seedance.get("duration") == 5,
+        "Seedance profile did not compile explicit API parameters",
     )
     require(
         compile_minimax_music_payload(

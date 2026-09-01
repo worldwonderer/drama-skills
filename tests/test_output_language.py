@@ -73,6 +73,25 @@ class ProjectLanguageTests(unittest.TestCase):
         self.assertEqual(status["prompt_language"], "en")
         self.assertEqual(status["video_prompt_language"], "zh-CN")
 
+    def test_status_exposes_prompt_facing_video_model_choices(self) -> None:
+        root, project = self.initialize(prompt_language="en")
+        choices = {
+            "target_video_model": "minimax-h3",
+            "video_prompt_dialect": "minimax-h3",
+            "video_prompt_language": "en",
+            "native_duration_seconds": {"min": 4, "max": 15},
+            "supported_generation_modes": ["text", "reference"],
+            "audio_generation": "same_pass",
+        }
+        project["creator_authority"]["production_profile"] = {
+            "status": "accepted",
+            "choices": choices,
+        }
+        project_tool.atomic_json(root / project_tool.PROJECT_FILE, project)
+        self.assertEqual(
+            project_tool.project_status(root)["video_model_profile"], choices
+        )
+
     def test_video_prompt_language_falls_back_to_general_prompt_language(self) -> None:
         root, _ = self.initialize(prompt_language="ko")
         self.assertEqual(project_tool.project_status(root)["video_prompt_language"], "ko")

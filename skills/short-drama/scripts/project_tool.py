@@ -225,6 +225,32 @@ def project_languages(project: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
+def project_video_model_profile(project: Mapping[str, Any]) -> dict[str, Any]:
+    """Expose the accepted prompt-facing model choices without guessing defaults."""
+    authority = project.get("creator_authority")
+    production_profile = (
+        authority.get("production_profile")
+        if isinstance(authority, Mapping)
+        else None
+    )
+    choices = (
+        production_profile.get("choices")
+        if isinstance(production_profile, Mapping)
+        else None
+    )
+    if not isinstance(choices, Mapping):
+        return {}
+    fields = (
+        "target_video_model",
+        "video_prompt_dialect",
+        "video_prompt_language",
+        "native_duration_seconds",
+        "supported_generation_modes",
+        "audio_generation",
+    )
+    return {field: choices[field] for field in fields if field in choices}
+
+
 def initialize_project(
     path: Path,
     *,
@@ -858,12 +884,14 @@ def _build_status(
                 if isinstance(output, str) and output:
                     ownership[output] = owner
     languages = project_languages(project)
+    video_model_profile = project_video_model_profile(project)
     return {
         "project_id": project.get("project_id"),
         "title": project.get("title"),
         "language": languages["language"],
         "prompt_language": languages["prompt_language"],
         "video_prompt_language": languages["video_prompt_language"],
+        "video_model_profile": video_model_profile,
         "project_root": project_root,
         "last_action": state.get("last_action"),
         "layout": dict(layout),

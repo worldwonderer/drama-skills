@@ -107,11 +107,11 @@ the project job remains provider-neutral, and adapter selection, model access,
 polling and credentials stay in the external runtime configuration.
 
 The confirmed document includes `source_entry` and `reference_bindings`. Bundled
-image/video compilers append a deterministic, ordered reference contract to the
-provider prompt so the Chinese label, role, allowed controls, and prohibited
-controls survive the handoff. Its prose follows `parameters.prompt_language`, and a reference is
-described generically rather than assuming every bound artifact is an image. External adapters must
-preserve equivalent semantics
+image/video compilers append an ordered reference contract to the provider prompt so the Chinese
+label, role, allowed controls, and prohibited controls survive the handoff. Its prose follows
+`parameters.prompt_language`; model-native compilers also use that model's actual reference tokens,
+such as Seedance `@图片1` or H3 `<Picture 1>`, rather than adding a second generic numbering scheme.
+External adapters must preserve equivalent semantics
 or reject the job; silently reducing the input to an unlabelled file list is invalid.
 
 ## Adapter stdout
