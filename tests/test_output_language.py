@@ -92,6 +92,12 @@ class ProjectLanguageTests(unittest.TestCase):
             project_tool.project_status(root)["video_model_profile"], choices
         )
 
+        project["creator_authority"]["production_profile"]["status"] = "unset"
+        project_tool.atomic_json(root / project_tool.PROJECT_FILE, project)
+        self.assertEqual(
+            project_tool.project_status(root)["video_model_profile"], {}
+        )
+
     def test_video_prompt_language_falls_back_to_general_prompt_language(self) -> None:
         root, _ = self.initialize(prompt_language="ko")
         self.assertEqual(project_tool.project_status(root)["video_prompt_language"], "ko")

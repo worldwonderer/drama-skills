@@ -76,6 +76,23 @@ class SimpleLifecycleTests(unittest.TestCase):
                 self.assertTrue((root / relative).is_dir(), relative)
             self.assertFalse((root / ".short-drama/transactions").exists())
 
+    def test_init_keeps_confirmed_episode_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            result = project_tool.initialize_project(
+                root,
+                title="一分钟短剧",
+                language="zh-CN",
+                aspect_ratio="9:16",
+                episode_count=1,
+                target_seconds_per_episode=60,
+                suite_root=SKILL,
+            )
+            self.assertEqual(result["project"]["format"]["episode_count"], 1)
+            self.assertEqual(
+                result["project"]["format"]["target_seconds_per_episode"], 60
+            )
+
     def test_cli_exposes_no_recovery_command(self) -> None:
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--help"],
