@@ -1745,6 +1745,57 @@ process.stdout.write(JSON.stringify([
         self.assertTrue(html_kept_as_text)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
+    def test_frontend_renders_one_copyable_prompt_as_one_block(self) -> None:
+        # A MiniMax H3 reference body is six `>` lines that go into one request.
+        # Rendering each as its own bordered box made one prompt look like six,
+        # and a creator asked which of them to copy (#97).
+        app = dashboard_server.STATIC_ROOT / "app.js"
+        script = f"""
+class N {{
+  constructor(tag) {{ this.tagName = (tag || "").toUpperCase(); this.children = []; this.textContent = ""; this.className = ""; this.dataset = {{}}; }}
+  set innerHTML(_value) {{ throw new Error("unsafe HTML sink"); }}
+  append(...kids) {{ for (const kid of kids) this.children.push(kid); }}
+  get text() {{ return this.textContent || this.children.map((kid) => (kid.text !== undefined ? kid.text : String(kid.data ?? ""))).join(""); }}
+}}
+const logic = require({json.dumps(str(app))});
+globalThis.document = {{
+  createElement: (tag) => new N(tag),
+  createTextNode: (data) => ({{ data, text: String(data) }}),
+  createDocumentFragment: () => new N("#fragment"),
+  getElementById: () => null,
+}};
+const prompt = [
+  "### \u53ef\u590d\u5236\u63d0\u793a\u8bcd",
+  "> subject_definitions: <Picture 1> is the storyboard keyframe.",
+  "> summary: Create one shot from the ordered picture references.",
+  "> retention_analysis: Retain the composition from <Picture 1>.",
+  "> detailed_description: [Shot 1] Overhead night study desk.",
+  "> overall_soundscape: 0-1s black silence, then low war drums.",
+  "> non_diegetic_music: N/A",
+].join("\\n");
+const one = logic.renderMarkdown(prompt);
+const quotes = one.children.filter((node) => node.tagName === "BLOCKQUOTE");
+const split = logic.renderMarkdown("> first paragraph\\n\\n> second paragraph");
+process.stdout.write(JSON.stringify([
+  quotes.length,
+  quotes.length === 1 && quotes[0].text.includes("subject_definitions")
+    && quotes[0].text.includes("non_diegetic_music"),
+  quotes.length === 1
+    && quotes[0].children.filter((kid) => kid.tagName === "BR").length,
+  split.children.filter((node) => node.tagName === "BLOCKQUOTE").length,
+]));
+"""
+        completed = run_node(script)
+        boxes, keeps_every_section, breaks, split_by_blank_line = json.loads(
+            completed.stdout
+        )
+        self.assertEqual(boxes, 1)
+        self.assertTrue(keeps_every_section)
+        self.assertEqual(breaks, 5)
+        # A blank line still separates two quotes, as Markdown says it does.
+        self.assertEqual(split_by_blank_line, 2)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is unavailable")
     def test_frontend_understands_creator_first_episode_documents(self) -> None:
         # Raw directory order buried the screenplay below every generated prompt.
         app = dashboard_server.STATIC_ROOT / "app.js"

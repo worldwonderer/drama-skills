@@ -697,7 +697,13 @@ function renderMarkdown(content) {
   // A generated prompt is meant to be selected and copied as one block, so a
   // fenced run is captured verbatim instead of being re-parsed as Markdown.
   let fence = null;
+  // Consecutive `>` lines are one blockquote in Markdown, and a copyable prompt
+  // is written that way on purpose: a MiniMax H3 reference body is six lines
+  // that go into one request. Rendering each line as its own bordered box made
+  // one prompt look like six separate ones, and creators asked which to copy.
+  let quoteNode = null;
   const closeList = () => { list = null; listKind = null; };
+  const closeQuote = () => { quoteNode = null; };
   for (const line of content.split("\n")) {
     if (fence !== null) {
       if (/^\s*```/.test(line)) {
@@ -710,10 +716,11 @@ function renderMarkdown(content) {
       }
       continue;
     }
-    if (/^\s*```/.test(line)) { closeList(); fence = []; continue; }
+    if (/^\s*```/.test(line)) { closeList(); closeQuote(); fence = []; continue; }
     const heading = /^(#{1,4})\s+(.+)$/.exec(line);
     if (heading) {
       closeList();
+      closeQuote();
       const node = element(`h${heading[1].length}`);
       appendInlineText(node, heading[2]);
       fragment.append(node);
@@ -722,6 +729,7 @@ function renderMarkdown(content) {
     const bullet = /^[-*]\s+(.+)$/.exec(line);
     const ordered = /^\d+[.)]\s+(.+)$/.exec(line);
     if (bullet || ordered) {
+      closeQuote();
       const kind = bullet ? "ul" : "ol";
       if (!list || listKind !== kind) { list = element(kind); listKind = kind; fragment.append(list); }
       const node = element("li");
@@ -730,10 +738,17 @@ function renderMarkdown(content) {
       continue;
     }
     closeList();
-    if (!line.trim()) continue;
+    if (!line.trim()) { closeQuote(); continue; }
     const quote = /^>\s?(.*)$/.exec(line);
-    const node = element(quote ? "blockquote" : "p");
-    appendInlineText(node, quote ? quote[1] : line);
+    if (quote) {
+      if (quoteNode) quoteNode.append(element("br"));
+      else { quoteNode = element("blockquote"); fragment.append(quoteNode); }
+      appendInlineText(quoteNode, quote[1]);
+      continue;
+    }
+    closeQuote();
+    const node = element("p");
+    appendInlineText(node, line);
     fragment.append(node);
   }
   // An unterminated fence still renders as a block rather than vanishing.
