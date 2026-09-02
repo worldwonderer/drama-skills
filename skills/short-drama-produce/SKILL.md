@@ -19,6 +19,10 @@ license: MIT
 `### 冻结关键帧提示词`）。分镜这一路是本套件里唯一能把某一镜的起始画面渲染成文件的入口；
 产出落在 `剧集/<EP>/制作成果/images/` 后，分镜 owner 才能把它绑成 `用途：起始帧` 的 `REF-...`。存在真实参考图时，
 还必须逐张填写 `reference_bindings` 的槽位、顺序、路径、中文名、用途以及允许/禁止控制范围；
+内置视频 adapter 把这里的 `用途` 字段读成供应商自己的 role，只接受它公布的取值
+（MiniMax 为 `first_frame`/`last_frame`/`reference_image`/`reference_video`/`reference_audio`，
+Seedance 为三个 `reference_*`）；带参考图却没有绑定的 job 会直接失败，不替它猜一个 role。
+本地图片由内置 adapter 按 base64 data URI 直接送出，不需要自建上传服务。
 `references` 可以省略并由绑定顺序生成，也可以作为相同顺序的显式镜像。输出放在
 `剧集/<EP>/制作成果/`；这个 job 是生产工具的临时输入，不是第六份创作文档：
 

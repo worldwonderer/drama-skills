@@ -30,11 +30,16 @@ profile above explicitly permits their values, then sent as the API's top-level 
 that every Seedance release supports every value.
 
 `compile_seedance_payload` accepts explicit `reference_image`, `reference_video`, and
-`reference_audio` roles with matching HTTPS or `asset://` URLs. It emits the matching multimodal
+`reference_audio` roles with matching HTTPS, `asset://` or base64 data URI values. It emits the matching multimodal
 content type and uses `@图片N`、`@视频N`、`@音频N` in its appended reference contract. The bundled
-runtime still supports text-to-video only because it has no trusted upload step. A deployment that
-uses local references must upload them outside the creator project, then call the compiler with the
-resulting trusted URI; do not store temporary provider URLs in the project.
+runtime sends a project-relative reference inline as a `data:<mime>;base64,<...>` URI, which the
+official contract lists alongside a public URL and `asset://`, so binding an image in the creator
+documents is enough to run the job. Each file's bytes must match the media type its extension claims.
+Volcengine publishes no per-file size numbers, so this adapter applies the same conservative guard as
+the MiniMax path — 30MB per image, 50MB per video, 15MB per audio clip, 64MB per request after base64
+expansion — and fails closed above them rather than sending a body the provider may reject. Each
+reference takes its provider role from the confirmed job's `reference_bindings[].role`; a job with
+references but no bindings fails closed rather than guessing.
 
 Prompt wording for Seedance 2.0 is version-specific: normal reference uses “参考 @视频1”, while
 continuation says “向后延长 @视频1” and binds the actual tail as `@图片1`. See the video-prompt

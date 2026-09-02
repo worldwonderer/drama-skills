@@ -44,15 +44,20 @@ frame conditioning (`first_frame` / `last_frame`) and full-reference conditionin
 (`reference_image` / `reference_video` / `reference_audio`) are mutually exclusive in one request.
 For continuation, bind the previous actual video as `reference_video` and its actual tail as
 `reference_image`; the compiler labels them `<Video 1>` and `<Picture 1>` in its appended contract.
-Never relabel that tail as `first_frame` while a reference video is present. Reference URLs must be
-HTTPS or `mm_file://`;
-local references fail closed, exactly as for Seedance, because the public contract does not prove
-that a local data URL is accepted. A deployment that needs image-to-video must add an external,
-authorized upload step and call `compile_minimax_h3_payload` with the resulting URI; do not put a
-temporary provider URL into the creator project.
+Never relabel that tail as `first_frame` while a reference video is present. Reference URLs may be HTTPS, `mm_file://{file_id}`, or a `data:<mime>;base64,<...>` URI — all three
+are documented inputs. A project-relative reference in the confirmed job is read from disk and sent
+inline as a data URI, so binding an image in the creator documents is enough to run the job; no
+upload service is required. Each file's bytes must match the media type its extension claims, and
+the published per-modality caps apply: 30MB per image, 50MB per video, 15MB per audio clip, and 64MB
+for the whole request measured after base64 expansion. A reference past those caps fails closed with
+an explicit message; host it and bind an HTTPS URL instead of splitting it.
 
-The adapter creates an asynchronous task, polls `GET {base}/video_generation/{task_id}` until a
-terminal state, and downloads `task.content.url` into a private temporary directory. Any unknown
+Each reference takes its provider role from the confirmed job's `reference_bindings[].role`, which is
+where the creator document's `用途` is translated for this provider. A job that carries references
+without those bindings fails closed rather than guessing a role.
+
+The adapter creates an asynchronous task with `POST {base}/video_generation`, polls
+`GET {base}/query/video_generation/{task_id}` until a terminal state, and downloads `task.content.url` into a private temporary directory. Any unknown
 status fails closed.
 
 ## What this model changes for the prompt itself

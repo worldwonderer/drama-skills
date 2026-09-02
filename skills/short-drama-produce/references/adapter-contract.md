@@ -17,7 +17,7 @@
       "order": 1,
       "path": "输入/approved-character-reference.png",
       "label": "女主定妆照",
-      "role": "identity_and_look",
+      "role": "reference_image",
       "may_control": ["身份", "造型"],
       "must_not_control": ["构图", "动作"]
     }
@@ -51,7 +51,13 @@
   this shot, from the closed set in the storyboard skill. `role` is its
   production-side translation and is chosen per provider, so the two are not
   compared; a binding whose `role` contradicts the declared `用途` is a defect
-  the creator document, not this schema, is the authority on.
+  the creator document, not this schema, is the authority on. This schema keeps
+  `role` free-form because an external adapter names its own inputs, but the
+  bundled video adapters read it as the provider's own role and accept only
+  their published vocabulary: `first_frame`, `last_frame`, `reference_image`,
+  `reference_video`, `reference_audio` for MiniMax, and the three `reference_*`
+  values for Seedance. A video job carrying references without bindings fails
+  closed there rather than having a role guessed for it.
 - `references`: zero to sixteen current project files actually sent to production.
   It may be omitted when `reference_bindings` is present, in which case the paths
   are derived in binding order. If both are present, they must match exactly.

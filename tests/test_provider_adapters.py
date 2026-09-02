@@ -97,11 +97,20 @@ class ProviderCompilerTests(unittest.TestCase):
 
         referenced = self.video_job()
         referenced["references"] = ["输入/reference.png"]
-        with self.assertRaisesRegex(ValueError, "HTTPS or asset"):
+        inline = provider_adapters.compile_seedance_payload(
+            referenced,
+            model="configured",
+            reference_urls=["data:image/png;base64,AAAA"],
+            reference_roles=["reference_image"],
+        )
+        self.assertEqual(
+            inline["content"][1]["image_url"]["url"], "data:image/png;base64,AAAA"
+        )
+        with self.assertRaisesRegex(ValueError, "HTTPS, asset:// or a base64 data URI"):
             provider_adapters.compile_seedance_payload(
                 referenced,
                 model="configured",
-                reference_urls=["data:image/png;base64,AAAA"],
+                reference_urls=["file:///etc/passwd"],
                 reference_roles=["reference_image"],
             )
         payload = provider_adapters.compile_seedance_payload(
@@ -457,7 +466,19 @@ class ProviderCompilerTests(unittest.TestCase):
             },
         )
         self.assertNotIn("ratio", payload)
-        with self.assertRaisesRegex(ValueError, "HTTPS or mm_file"):
+        inline = provider_adapters.compile_minimax_h3_payload(
+            job,
+            model="m",
+            reference_urls=["data:image/png;base64,AAAA"],
+            reference_roles=["first_frame"],
+            **self.minimax_video_profile(),
+        )
+        self.assertEqual(
+            inline["content"][1]["image_url"]["url"], "data:image/png;base64,AAAA"
+        )
+        with self.assertRaisesRegex(
+            ValueError, "HTTPS, mm_file:// or a base64 data URI"
+        ):
             provider_adapters.compile_minimax_h3_payload(
                 job,
                 model="m",
@@ -721,17 +742,245 @@ class ProviderRuntimeTests(unittest.TestCase):
                 raised.exception.public("minimax-h3")["code"], "invalid_model_profile"
             )
 
-    def test_seedance_runtime_refuses_unhosted_local_references(self) -> None:
+    def test_local_project_references_are_sent_inline(self) -> None:
+        """Issue #95: a project image had no way to reach either video provider.
+
+        Both document a base64 data URI as an accepted media input, so the file
+        the creator bound is sent directly instead of demanding an upload host
+        the suite never provided.
+        """
+        png = (
+            b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+        )
+        for provider, runner, env, role, parameters in (
+            (
+                "Seedance",
+                provider_adapters._run_seedance,
+                {
+                    "ARK_API_KEY": "secret",
+                    "SEEDANCE_MODEL": "configured",
+                    "SEEDANCE_ALLOWED_RATIOS": "9:16",
+                    "SEEDANCE_MIN_DURATION": "4",
+                    "SEEDANCE_MAX_DURATION": "15",
+                },
+                "reference_image",
+                {"duration": 5, "ratio": "9:16"},
+            ),
+            (
+                "MiniMax",
+                provider_adapters._run_minimax_video,
+                {
+                    "MINIMAX_API_KEY": "secret",
+                    "MINIMAX_VIDEO_MODEL": "configured",
+                    "MINIMAX_VIDEO_RESOLUTIONS": "768P",
+                    "MINIMAX_VIDEO_RATIOS": "9:16",
+                    "MINIMAX_VIDEO_MIN_DURATION": "4",
+                    "MINIMAX_VIDEO_MAX_DURATION": "15",
+                },
+                "first_frame",
+                {"duration": 5, "ratio": "9:16", "resolution": "768P"},
+            ),
+        ):
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "reference.png").write_bytes(png)
+                job = {
+                    "modality": "video",
+                    "prompt": "camera holds",
+                    "references": ["reference.png"],
+                    "reference_bindings": [
+                        {
+                            "slot_id": "REF-A",
+                            "order": 1,
+                            "path": "reference.png",
+                            "label": "参考图",
+                            "role": role,
+                            "may_control": ["身份"],
+                            "must_not_control": ["构图"],
+                        }
+                    ],
+                    "outputs": ["制作成果/shot.mp4"],
+                    "parameters": parameters,
+                    "project_root": str(root),
+                }
+                captured: dict[str, object] = {}
+
+                def fake_request(url, **kwargs):  # type: ignore[no-untyped-def]
+                    captured["body"] = kwargs.get("body")
+                    raise provider_adapters.AdapterFailure("stop after compile")
+
+                with mock.patch.dict(os.environ, env, clear=False), mock.patch.object(
+                    provider_adapters, "_request_json", fake_request
+                ):
+                    with self.assertRaisesRegex(
+                        provider_adapters.AdapterFailure, "stop after compile"
+                    ):
+                        runner(job)
+                body = captured["body"]
+                assert isinstance(body, dict)
+                urls = [
+                    item[item["type"]]["url"]
+                    for item in body["content"]
+                    if item["type"] != "text"
+                ]
+                self.assertEqual(len(urls), 1)
+                self.assertTrue(urls[0].startswith("data:image/png;base64,"))
+
+    def test_inline_references_are_bounded_and_type_checked(self) -> None:
+        """Inlining reads local bytes, so the guards have to hold at that edge."""
+        limits = provider_adapters.INLINE_REFERENCE_LIMITS
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "reference.png").write_bytes(b"PNG")
+            good = root / "frame.png"
+            good.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 24)
+            lying = root / "frame2.png"
+            lying.write_bytes(b"\xff\xd8\xff" + b"\x00" * 24)
+            empty = root / "frame3.png"
+            empty.write_bytes(b"")
+            wrong_kind = root / "clip.mp4"
+            wrong_kind.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 16)
+
+            urls = provider_adapters._inline_reference_urls(
+                [good], ["reference_image"],
+                allowed=provider_adapters.SEEDANCE_REFERENCE_ROLES,
+                provider="Seedance",
+            )
+            self.assertTrue(urls[0].startswith("data:image/png;base64,"))
+
+            for label, paths, roles, expected in (
+                ("bytes do not match the suffix", [lying], ["reference_image"], "target media type"),
+                ("empty file", [empty], ["reference_image"], "reference is empty"),
+                (
+                    "video bound to an image role",
+                    [wrong_kind],
+                    ["reference_image"],
+                    "does not accept a .mp4 file",
+                ),
+            ):
+                with self.subTest(case=label):
+                    with self.assertRaisesRegex(
+                        provider_adapters.AdapterFailure, expected
+                    ):
+                        provider_adapters._inline_reference_urls(
+                            paths, roles,
+                            allowed=provider_adapters.SEEDANCE_REFERENCE_ROLES,
+                            provider="Seedance",
+                        )
+
+            oversized = root / "big.png"
+            oversized.write_bytes(
+                b"\x89PNG\r\n\x1a\n" + b"\x00" * limits["image_url"]
+            )
+            with self.assertRaisesRegex(
+                provider_adapters.AdapterFailure, "exceeds the 30MB inline limit"
+            ):
+                provider_adapters._inline_reference_urls(
+                    [oversized], ["reference_image"],
+                    allowed=provider_adapters.SEEDANCE_REFERENCE_ROLES,
+                    provider="Seedance",
+                )
+
+    def test_minimax_polls_the_official_query_endpoint(self) -> None:
+        """Issue #95: the task was created and generated, then never retrieved.
+
+        The official query path is `/query/video_generation/{id}`; this adapter
+        polled `/video_generation/{id}`, which never reports a terminal state.
+        """
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+        mp4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 16
+        requested: list[tuple[str, str]] = []
+
+        class Response:
+            def __init__(self, payload: bytes) -> None:
+                self._payload = payload
+                self.headers = {}
+
+            def __enter__(self):  # type: ignore[no-untyped-def]
+                return self
+
+            def __exit__(self, *exc: object) -> bool:
+                return False
+
+            def read(self, *_: object) -> bytes:
+                payload, self._payload = self._payload, b""
+                return payload
+
+        def fake_urlopen(request, timeout=None):  # type: ignore[no-untyped-def]
+            url = request if isinstance(request, str) else request.full_url
+            method = "GET" if isinstance(request, str) else request.method
+            requested.append((method, url))
+            if url.endswith("/video_generation") and method == "POST":
+                return Response(b'{"task_id": "task-1"}')
+            if "/query/video_generation/task-1" in url:
+                return Response(
+                    b'{"task": {"status": "succeeded",'
+                    b' "content": {"url": "https://cdn.example/out.mp4"}}}'
+                )
+            if url == "https://cdn.example/out.mp4":
+                return Response(mp4)
+            raise AssertionError(f"unexpected request: {method} {url}")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "reference.png").write_bytes(png)
+            outputs = root / "out"
+            outputs.mkdir()
+            job = {
+                "modality": "video",
+                "prompt": "camera holds",
+                "references": ["reference.png"],
+                "reference_bindings": [
+                    {
+                        "slot_id": "REF-A",
+                        "order": 1,
+                        "path": "reference.png",
+                        "label": "起始帧",
+                        "role": "first_frame",
+                        "may_control": ["起始构图"],
+                        "must_not_control": ["动作"],
+                    }
+                ],
+                "outputs": ["制作成果/shot.mp4"],
+                "parameters": {"duration": 5, "resolution": "768P"},
+                "project_root": str(root),
+                "output_root": str(outputs),
+            }
+            environment = {
+                "MINIMAX_API_KEY": "secret",
+                "MINIMAX_VIDEO_MODEL": "configured",
+                "MINIMAX_VIDEO_RESOLUTIONS": "768P",
+                "MINIMAX_VIDEO_MIN_DURATION": "4",
+                "MINIMAX_VIDEO_MAX_DURATION": "15",
+            }
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+                provider_adapters.urllib.request, "urlopen", fake_urlopen
+            ):
+                path, task_id = provider_adapters._run_minimax_video(job)
+            self.assertEqual(task_id, "task-1")
+            self.assertEqual(path.read_bytes(), mp4)
+
+        self.assertEqual(
+            requested[0],
+            ("POST", "https://api.minimax.io/v2/video_generation"),
+        )
+        self.assertEqual(
+            requested[1],
+            ("GET", "https://api.minimax.io/v2/query/video_generation/task-1"),
+        )
+        create = requested[0]
+        self.assertNotIn("/query/", create[1])
+
+    def test_a_reference_without_a_declared_role_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "reference.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 24)
             with mock.patch.dict(
                 os.environ,
                 {"ARK_API_KEY": "secret", "SEEDANCE_MODEL": "configured"},
                 clear=False,
             ):
                 with self.assertRaisesRegex(
-                    provider_adapters.AdapterFailure, "trusted HTTPS upload"
+                    provider_adapters.AdapterFailure, "reference_bindings entry each"
                 ):
                     provider_adapters._run_seedance(
                         {

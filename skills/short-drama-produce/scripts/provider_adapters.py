@@ -55,6 +55,32 @@ MINIMAX_VIDEO_ROLES = {
     "reference_video": "video_url",
     "reference_audio": "audio_url",
 }
+# Both providers document a `data:<mime>;base64,<...>` URI as an accepted media
+# input alongside a public URL, so a local project reference needs no upload
+# service to reach them. The caps are MiniMax's published per-modality limits;
+# Seedance publishes no numbers, so the same conservative guard is applied there
+# and can be raised per deployment. Base64 inflates bytes by about a third, so
+# the request cap is checked against the encoded size.
+INLINE_REFERENCE_LIMITS = {
+    "image_url": 30 * 1024 * 1024,
+    "video_url": 50 * 1024 * 1024,
+    "audio_url": 15 * 1024 * 1024,
+}
+INLINE_REFERENCE_BODY_LIMIT = 64 * 1024 * 1024
+INLINE_REFERENCE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+}
 GPT_IMAGE_MIN_PIXELS = 655_360
 GPT_IMAGE_MAX_PIXELS = 8_294_400
 MINIMUM_PYTHON = (3, 9)
@@ -389,8 +415,11 @@ def compile_seedance_payload(
                 and parsed.netloc.startswith("asset-")
                 and not parsed.path
             )
+            or _is_inline_reference(url)
         ):
-            raise ValueError("Seedance reference URL must be HTTPS or asset://")
+            raise ValueError(
+                "Seedance reference URL must be HTTPS, asset:// or a base64 data URI"
+            )
         content.append({"type": field, field: {"url": url}, "role": role})
     body: dict[str, Any] = {"model": model.strip(), "content": content}
     if ratio is not None:
@@ -548,8 +577,11 @@ def compile_minimax_h3_payload(
         if not (
             (parsed.scheme == "https" and parsed.netloc)
             or (parsed.scheme == "mm_file" and parsed.netloc and not parsed.path)
+            or _is_inline_reference(url)
         ):
-            raise ValueError("MiniMax reference URL must be HTTPS or mm_file://")
+            raise ValueError(
+                "MiniMax reference URL must be HTTPS, mm_file:// or a base64 data URI"
+            )
         field = MINIMAX_VIDEO_ROLES[role]
         content.append({"type": field, field: {"url": url}, "role": role})
     frame_roles = {"first_frame", "last_frame"}
@@ -911,6 +943,97 @@ def _reference_paths(job: Mapping[str, Any]) -> list[Path]:
     return result
 
 
+def _binding_roles(
+    job: Mapping[str, Any], *, allowed: Mapping[str, str], provider: str
+) -> list[str]:
+    """The provider role of each reference, taken from the confirmed job.
+
+    `role` is the production-side translation of the creator document's 用途, so
+    it is the job -- not this adapter -- that decides what a picture is for.
+    """
+    bindings = job.get("reference_bindings", [])
+    references = job.get("references", [])
+    if not isinstance(bindings, list) or len(bindings) != len(references):
+        raise AdapterFailure(
+            f"{provider} references need one reference_bindings entry each, "
+            "carrying the provider role for that file",
+            category="configuration",
+            code="missing_reference_roles",
+        )
+    roles: list[str] = []
+    for binding in bindings:
+        role = binding.get("role") if isinstance(binding, Mapping) else None
+        if not isinstance(role, str) or role not in allowed:
+            raise AdapterFailure(
+                f"{provider} reference role must be one of "
+                + ", ".join(sorted(allowed))
+                + f"; got {role!r}",
+                category="configuration",
+                code="invalid_reference_role",
+            )
+        roles.append(role)
+    return roles
+
+
+def _inline_reference_urls(
+    paths: Sequence[Path], roles: Sequence[str], *, allowed: Mapping[str, str], provider: str
+) -> list[str]:
+    """Encode local project references as `data:` URIs the provider accepts."""
+    urls: list[str] = []
+    total = 0
+    for path, role in zip(paths, roles):
+        field = allowed[role]
+        suffix = path.suffix.casefold()
+        mime = INLINE_REFERENCE_MIME.get(suffix)
+        expected = field.split("_", 1)[0]
+        if mime is None or not mime.startswith(expected):
+            raise AdapterFailure(
+                f"{provider} {role} does not accept a {suffix or 'suffixless'} file",
+                category="configuration",
+                code="invalid_reference_type",
+            )
+        try:
+            content = path.read_bytes()
+        except OSError as exc:
+            raise AdapterFailure(
+                f"{provider} could not read a project reference",
+                category="configuration",
+                code="unreadable_reference",
+            ) from exc
+        if not content:
+            raise AdapterFailure(
+                f"{provider} project reference is empty",
+                category="configuration",
+                code="empty_reference",
+            )
+        # The bytes have to be the media type the extension claims, or the
+        # provider rejects a request this adapter said was well formed.
+        _validate_media_content(path.name, content)
+        limit = INLINE_REFERENCE_LIMITS[field]
+        if len(content) > limit:
+            raise AdapterFailure(
+                f"{provider} reference exceeds the {limit // (1024 * 1024)}MB inline "
+                "limit; host it and bind an HTTPS URL instead",
+                category="configuration",
+                code="reference_too_large",
+            )
+        encoded = base64.b64encode(content).decode("ascii")
+        total += len(encoded)
+        if total > INLINE_REFERENCE_BODY_LIMIT:
+            raise AdapterFailure(
+                f"{provider} inline references exceed the request body limit; "
+                "host the largest ones and bind HTTPS URLs instead",
+                category="configuration",
+                code="reference_body_too_large",
+            )
+        urls.append(f"data:{mime};base64,{encoded}")
+    return urls
+
+
+def _is_inline_reference(url: str) -> bool:
+    return bool(re.fullmatch(r"data:[\w.+-]+/[\w.+-]+;base64,[A-Za-z0-9+/]+=*", url))
+
+
 def _validate_media_content(target: str, content: bytes) -> None:
     suffix = Path(target).suffix.casefold()
     signatures = {
@@ -1015,14 +1138,20 @@ def _run_seedance(job: Mapping[str, Any]) -> tuple[Path, str]:
     token = _credential("ARK_API_KEY")
     model = os.environ.get("SEEDANCE_MODEL", "")
     references = _reference_paths(job)
-    if references:
-        raise AdapterFailure(
-            "Seedance local references require an external trusted HTTPS upload adapter"
-        )
+    reference_roles = (
+        _binding_roles(job, allowed=SEEDANCE_REFERENCE_ROLES, provider="Seedance")
+        if references
+        else []
+    )
+    reference_urls = _inline_reference_urls(
+        references, reference_roles, allowed=SEEDANCE_REFERENCE_ROLES, provider="Seedance"
+    )
     allowed_ratios, duration_range = _seedance_runtime_profile()
     body = compile_seedance_payload(
         job,
         model=model,
+        reference_urls=reference_urls,
+        reference_roles=reference_roles,
         allowed_ratios=allowed_ratios,
         duration_range=duration_range,
     )
@@ -1202,14 +1331,21 @@ def _run_minimax(job: Mapping[str, Any]) -> tuple[Path, str | None]:
 def _run_minimax_video(job: Mapping[str, Any]) -> tuple[Path, str]:
     token = _credential("MINIMAX_API_KEY")
     model = os.environ.get("MINIMAX_VIDEO_MODEL", "")
-    if _reference_paths(job):
-        raise AdapterFailure(
-            "MiniMax local references require an external trusted HTTPS or mm_file upload adapter"
-        )
+    references = _reference_paths(job)
+    reference_roles = (
+        _binding_roles(job, allowed=MINIMAX_VIDEO_ROLES, provider="MiniMax")
+        if references
+        else []
+    )
+    reference_urls = _inline_reference_urls(
+        references, reference_roles, allowed=MINIMAX_VIDEO_ROLES, provider="MiniMax"
+    )
     ratios, resolutions, duration_range = _minimax_video_runtime_profile()
     body = compile_minimax_h3_payload(
         job,
         model=model,
+        reference_urls=reference_urls,
+        reference_roles=reference_roles,
         allowed_ratios=ratios,
         allowed_resolutions=resolutions,
         duration_range=duration_range,
@@ -1238,7 +1374,8 @@ def _run_minimax_video(job: Mapping[str, Any]) -> tuple[Path, str]:
         raise AdapterFailure("MiniMax polling configuration is invalid")
     while time.monotonic() < deadline:
         document, _ = _request_json(
-            f"{base}/video_generation/{urllib.parse.quote(task_id, safe='')}",
+            f"{base}/query/video_generation/"
+            + urllib.parse.quote(task_id, safe=""),
             provider="minimax-h3",
             method="GET",
             token=token,
