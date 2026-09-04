@@ -129,6 +129,13 @@ CREATOR_SOURCE_ENTRIES = {
 }
 
 REF_SLOT_RE = re.compile(r"REF-[A-Z0-9][A-Z0-9-]{0,79}")
+# A slot head, not a bare substring: a real reference file may legitimately be
+# named `plan-sheet.png`, and that is not a creator-supplied declaration.
+PLAN_SLOT_HEAD_RE = re.compile(r"PLAN-[A-Za-z0-9][A-Za-z0-9-]{0,79}（顺序：")
+PLAN_SLOT_RE = re.compile(
+    r"PLAN-[A-Za-z0-9][A-Za-z0-9-]{0,79}（顺序：[1-9]\d*）· "
+    r"(?:IMG|SHOT)-[A-Za-z0-9-]+《[^》\n]+》（[^）\n]*）"
+)
 SOURCE_ENTRY_RE = re.compile(r"[A-Z][A-Z0-9-]{1,99}")
 REFERENCE_SUFFIX_RE = r"(?:png|jpe?g|webp)"
 # 用途 is the creator-facing question "what does this picture decide here"; the
@@ -811,7 +818,7 @@ def _contains_plan_token(value: str) -> bool:
 
 
 def _markdown_reference_bindings(
-    section: str, *, field_name: str
+    section: str, *, field_name: str, creator_supplied_ok: bool = False
 ) -> list[dict[str, Any]]:
     lines = re.findall(
         rf"^- {re.escape(field_name)}：(.+)$", section, re.MULTILINE
@@ -834,13 +841,20 @@ def _markdown_reference_bindings(
     ):
         return []
     # A `PLAN-...` slot is a picture the creator attaches in their own tool, so
-    # this suite has no file to send. Saying that plainly beats a generic syntax
-    # complaint about a declaration that is correctly written for its purpose.
-    if _contains_plan_token(value):
-        raise ValueError(
-            "source entry declares creator-supplied references (PLAN-...); "
-            "bind the real files as REF-... before producing"
-        )
+    # this suite has no file to send. The rendering job that draws a shot's own
+    # start frame is unaffected -- it works from the frozen keyframe text, the
+    # way it already does for 「待补参考图」 -- so only the job that would have
+    # sent these pictures as model inputs refuses. Matched as a slot head rather
+    # than a bare substring, or a real file named `plan-sheet.png` would refuse.
+    if PLAN_SLOT_HEAD_RE.search(value):
+        if not creator_supplied_ok:
+            raise ValueError(
+                "source entry declares creator-supplied references (PLAN-...); "
+                "bind the real files as REF-... before producing"
+            )
+        value = PLAN_SLOT_RE.sub("", value).strip("；;。 ")
+        if not value:
+            return []
     matches = list(REFERENCE_LINE_RE.finditer(value))
     if not matches:
         raise ValueError("source entry input-reference declaration is invalid")
@@ -881,7 +895,13 @@ def _verify_markdown_source(
     _, heading, field_name = CREATOR_SOURCE_ENTRIES[source_path.name]
     if _copyable_prompt(section, heading) != prompt.strip():
         raise ValueError("job prompt does not match the selected source entry")
-    declared = _markdown_reference_bindings(section, field_name=field_name)
+    declared = _markdown_reference_bindings(
+        section,
+        field_name=field_name,
+        # 分镜.md is the entry that renders a shot's own start frame. Its
+        # reference field records creative intent, not this job's inputs.
+        creator_supplied_ok=source_path.name == "分镜.md",
+    )
     comparable = [
         {key: binding[key] for key in (
             "slot_id",

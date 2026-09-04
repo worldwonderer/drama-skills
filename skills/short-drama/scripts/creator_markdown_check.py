@@ -68,6 +68,9 @@ REF_PURPOSES = (
 # `EP001-SC001` is the documented shape, but a project that scopes ids by season
 # writes `S01-EP001-SC001`. Both are one stable scene id, so the pattern takes
 # any hyphenated prefix rather than exactly one segment.
+SLOT_HEAD_RE = re.compile(
+    r"(?:REF|PLAN)-[A-Za-z0-9][A-Za-z0-9-]*（顺序：", re.IGNORECASE
+)
 SCENE_ID_PATTERN = r"(?:[A-Za-z0-9]+-)+SC[0-9]+"
 SCENE_HEADING_RE = re.compile(
     r"^## (" + SCENE_ID_PATTERN + r")\b", re.MULTILINE
@@ -77,7 +80,7 @@ SCENE_ID_RE = re.compile(SCENE_ID_PATTERN)
 # omission and always required a reason; without a place to write it the
 # omission and an oversight look identical in the finished document.
 UNFILMED_LINE_RE = re.compile(
-    r"^[ \t\u3000]*[-*+][ \t\u3000]*未拍场次[：:].*$", re.MULTILINE
+    r"^[ \t\u3000]*[-*+][ \t\u3000]*未拍场次[：:](.*)$", re.MULTILINE
 )
 UNFILMED_ENTRY_RE = re.compile(
     r"(" + SCENE_ID_PATTERN + r")（理由：([^）\n]+)）"
@@ -86,7 +89,7 @@ UNFILMED_ENTRY_RE = re.compile(
 # inside quotation marks. Runs shorter than four Han characters are in-frame
 # labels and interjections far more often than they are lines, so the check
 # stays off them rather than inventing an escape hatch for signage.
-SPOKEN_SPAN_RE = re.compile(r"<d>([^<\n]*)</d>|[\"“]([^\"”\n]*)[\"”]|「([^」\n]*)」")
+SPOKEN_SPAN_RE = re.compile(r"<d>([^<]*)</d>|[\"“]([^\"”]*)[\"”]|「([^」]*)」")
 SPOKEN_RUN_RE = re.compile(r"[\u3400-\u9fff]{4,}")
 EXPLICIT_TEXT_TO_VIDEO = "无（创作者已明确选择文生视频）"
 PENDING_REFERENCE_SUFFIX_RE = re.compile(r"；待补参考图：[^；。\n]+。?$")
@@ -212,7 +215,7 @@ def _has_pending_references(value: str) -> bool:
 
 
 def _is_no_external_reference(value: str) -> bool:
-    return not _contains_ref_token(value) and bool(
+    return not _contains_slot_token(value) and bool(
         re.fullmatch(r"无(?:外部参考)?(?:；[^\n]*)?。?", value.strip())
     )
 
@@ -288,11 +291,10 @@ def _references(
             separators_are_valid = False
         cursor = end
     trailing = reference_value[cursor:]
-    # Counted on the same text the slots were matched in, so a gap list that
-    # happens to mention a slot id cannot turn into a phantom slot.
-    declared = len(
-        re.findall(r"\b(?:REF|PLAN)-[A-Z0-9-]+\b", reference_value, re.IGNORECASE)
-    )
+    # Counted as slot heads on the same text the slots were matched in. A bare
+    # token count would read the `ref-` in a real path like
+    # `输入/参考图/ref-江晨.png` as a second slot and reject a correct declaration.
+    declared = len(SLOT_HEAD_RE.findall(reference_value))
     kinds = frozenset(item[2] for item in matches)
     if (
         len(matches) != declared
@@ -347,7 +349,7 @@ def _references(
             errors.append(f"{owner}: 同一条目只能有一张{role}参考图")
     if "结束帧" in purposes and "起始帧" not in purposes:
         errors.append(f"{owner}: 绑定结束帧参考图时必须同时绑定起始帧")
-    for kind, group in zip(slot_kinds, groups):
+    for index, (kind, group) in enumerate(zip(slot_kinds, groups)):
         slot, raw_locator, label = group[0], group[2], group[3]
         may_control, must_not_control = group[5], group[6]
         if kind == "REF":
@@ -362,7 +364,9 @@ def _references(
                 elif not reference_path.is_file():
                     errors.append(f"{owner}: REF 文件不存在: {raw_locator}")
         else:
-            _plan_locator(raw_locator, label, owner, slot, entries, errors)
+            _plan_locator(
+                raw_locator, label, owner, slot, purposes[index], entries, errors
+            )
         if not re.search(r"[\u4e00-\u9fff]", label):
             errors.append(f"{owner}: {kind} 缺少中文名称: {slot}")
         if not may_control.strip() or not must_not_control.strip():
@@ -379,6 +383,7 @@ def _plan_locator(
     label: str,
     owner: str,
     slot: str,
+    purpose: str,
     entries: Optional[EntryIndex],
     errors: list[str],
 ) -> None:
@@ -398,6 +403,14 @@ def _plan_locator(
     elif locator.startswith("SHOT-"):
         if locator not in entries.shots:
             errors.append(f"{owner}: PLAN 指向不存在的 SHOT 条目: {locator}")
+        elif purpose == "起始帧":
+            # The picture that opens this shot is this shot's own frozen
+            # keyframe. Another shot's keyframe opens a different moment.
+            own = re.sub(r"^(?:SHOT|MOTION)-", "SHOT-", owner)
+            if own.startswith("SHOT-") and locator != own:
+                errors.append(
+                    f"{owner}: 起始帧 PLAN 必须指向本镜的冻结关键帧: {locator}"
+                )
     else:
         errors.append(
             f"{owner}: PLAN 定位符只能是 IMG-... 或 SHOT-...: {locator}"
@@ -905,20 +918,20 @@ def _shot_sources(
     if not plain:
         errors.append(f"{owner}: 缺少来源字段")
         return []
-    tokens = [item.strip() for item in re.split(r"[、,，；;]", plain) if item.strip()]
+    # 《镜头手艺》 asks for the scene id plus a short quote of the source line,
+    # and a quote contains commas of its own. So the ids are read out of the
+    # field rather than by cutting it into pieces on punctuation.
+    if SCENE_ID_RE.match(plain) is None:
+        errors.append(
+            f"{owner}: 来源必须以《剧本.md》的场景 ID 开头: {_excerpt(plain, 24)}"
+        )
+        return []
     resolved = []
-    for token in tokens:
-        # 《镜头手艺》 asks for the scene id plus a short quote of the source
-        # line, so only the head of each entry is the id; the rest is the quote.
-        leading = SCENE_ID_RE.match(token)
-        if leading is None:
-            errors.append(
-                f"{owner}: 来源必须以《剧本.md》的场景 ID 开头: {_excerpt(token, 24)}"
-            )
-        elif leading.group(0) not in scenes:
-            errors.append(f"{owner}: 来源场景不在《剧本.md》中: {leading.group(0)}")
+    for scene_id in _unique(SCENE_ID_RE.findall(plain)):
+        if scene_id not in scenes:
+            errors.append(f"{owner}: 来源场景不在《剧本.md》中: {scene_id}")
         else:
-            resolved.append(leading.group(0))
+            resolved.append(scene_id)
     return resolved
 
 
@@ -935,8 +948,8 @@ def _unfilmed_scenes(
         UNFILMED_LINE_RE.findall(head)
     ):
         errors.append("分镜.md: 未拍场次要写在第一个 SHOT 之前的正文开头")
-    for line in UNFILMED_LINE_RE.findall(head):
-        value = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+    for value in UNFILMED_LINE_RE.findall(head):
+        value = value.strip()
         entries = UNFILMED_ENTRY_RE.findall(value)
         remainder = UNFILMED_ENTRY_RE.sub("", value).strip("；;。 ")
         if not entries or remainder:
@@ -960,9 +973,18 @@ def _spoken_key(value: str) -> str:
 
 
 def _quoted_speech(prompt: str) -> list:
+    # The body is one prompt; a quote that happens to wrap across lines is the
+    # same quote. Chinese does not separate words with spaces, so rejoining the
+    # lines reconstructs the run exactly.
+    joined = prompt.replace("\n", "")
     runs: list = []
-    for match in SPOKEN_SPAN_RE.finditer(prompt):
+    for match in SPOKEN_SPAN_RE.finditer(joined):
         span = next((group for group in match.groups() if group), "")
+        # An unpaired quotation mark can pair with one much later and swallow
+        # the narration between them. That span is not a quotation, so it is
+        # not evidence of an invented line either.
+        if len(span) > 200:
+            continue
         runs.extend(SPOKEN_RUN_RE.findall(span))
     return runs
 
@@ -974,14 +996,16 @@ def _check_spoken_lines(
 
     The video stage already owes the screenplay verbatim dialogue. Checking it
     here is what stops a prompt from writing the line the shot wishes the
-    character had said. 视觉设定.md counts as a source because a location or
-    prop entry can legitimately carry the exact text on a sign.
+    character had said. 视觉设定.md and 分镜.md count as sources too: a location
+    or prop entry carries the exact text on a sign, and a shot's own fields
+    carry the on-screen text and sound this shot was designed around. What no
+    upstream document contains is a line the prompt made up.
     """
     for run in _quoted_speech(prompt):
         key = _spoken_key(run)
         if key and not any(key in source for source in sources):
             errors.append(
-                f"{owner}: 可复制提示词的引文不在《剧本.md》或《视觉设定.md》中: "
+                f"{owner}: 可复制提示词的引文在《剧本.md》《视觉设定.md》《分镜.md》里都找不到: "
                 f"{_excerpt(run, 24)}"
             )
 
@@ -1008,7 +1032,11 @@ def validate_episode(episode: Path, project_root: Optional[Path] = None) -> list
         )
     if len(scene_headings) != len(scenes):
         errors.append("剧本.md: 场景 ID 重复")
-    spoken_sources = (_spoken_key(screenplay), _spoken_key(visual))
+    spoken_sources = (
+        _spoken_key(screenplay),
+        _spoken_key(visual),
+        _spoken_key(storyboard),
+    )
     unfilmed = _unfilmed_scenes(storyboard, scenes, errors)
     claimed_scenes: set = set()
     locks = _continuity_locks(visual, errors)

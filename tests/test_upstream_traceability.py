@@ -163,6 +163,57 @@ class CreatorSuppliedReferenceTests(EpisodeFixture):
 
             self.assertEqual(creator_markdown_check.validate_episode(episode, project), [])
 
+    def test_a_start_frame_plan_names_this_shot_and_no_other(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project, episode = self.episode(directory)
+            self.bind(
+                episode,
+                CREATOR_SUPPLIED_PLAN.replace("SHOT-EP001-001《", "SHOT-EP001-003《"),
+            )
+
+            errors = creator_markdown_check.validate_episode(episode, project)
+            self.assertTrue(
+                any("起始帧 PLAN 必须指向本镜的冻结关键帧" in error for error in errors),
+                errors,
+            )
+
+    def test_a_real_file_named_like_a_slot_is_still_a_real_file(self) -> None:
+        """`ref-` and `plan-` occur in ordinary filenames; only a slot head is a slot."""
+        with tempfile.TemporaryDirectory() as directory:
+            project, episode = self.episode(directory)
+            reference = project / "输入/参考图/ref-plan-江晨.png"
+            reference.parent.mkdir(parents=True)
+            reference.write_bytes(b"structural fixture")
+            self.bind(
+                episode,
+                "REF-JIANGCHEN（顺序：1）· 输入/参考图/ref-plan-江晨.png《江晨定妆照》"
+                "（用途：身份；控制：脸型、体态；不得控制：构图、动作）",
+            )
+
+            self.assertEqual(creator_markdown_check.validate_episode(episode, project), [])
+            self.assertEqual(
+                production_tool._markdown_reference_bindings(
+                    "## SHOT-EP001-001 · 年轻的手\n"
+                    "- 输入参考图：REF-JIANGCHEN（顺序：1）· 输入/参考图/ref-plan-江晨.png"
+                    "《江晨定妆照》（用途：身份；控制：脸型；不得控制：构图）\n",
+                    field_name="输入参考图",
+                )[0]["path"],
+                "输入/参考图/ref-plan-江晨.png",
+            )
+
+    def test_a_plan_does_not_close_the_road_to_rendering_the_start_frame(self) -> None:
+        """分镜.md renders a shot's own keyframe; that job never sends these pictures."""
+        section = (
+            "## SHOT-EP001-001 · 年轻的手\n"
+            f"- 输入参考图：{CREATOR_SUPPLIED_PLAN}\n"
+        )
+        self.assertEqual(
+            production_tool._markdown_reference_bindings(
+                section, field_name="输入参考图", creator_supplied_ok=True
+            ),
+            [],
+        )
+
     def test_a_plan_cannot_be_sent_to_production(self) -> None:
         """The suite holds no file for these pictures, so a job would be a lie."""
         section = (
@@ -197,6 +248,34 @@ class StoryboardFollowsTheScreenplayTests(EpisodeFixture):
 
             errors = creator_markdown_check.validate_episode(episode, project)
             self.assertTrue(any("缺少来源字段" in error for error in errors), errors)
+
+    def test_a_source_quote_may_contain_its_own_commas(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project, episode = self.episode(directory)
+            self.edit(
+                episode / "分镜.md",
+                "- 来源：EP001-SC001",
+                "- 来源：EP001-SC001（“明白，我一定尽最大努力。”）",
+            )
+
+            self.assertEqual(creator_markdown_check.validate_episode(episode, project), [])
+
+    def test_an_omission_reason_may_contain_a_colon(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project, episode = self.episode(directory)
+            screenplay = episode / "剧本.md"
+            screenplay.write_text(
+                screenplay.read_text(encoding="utf-8")
+                + "\n## EP001-SC090 内 · 走廊 · 夜\n\n江晨停步。\n",
+                encoding="utf-8",
+            )
+            self.edit(
+                episode / "分镜.md",
+                "# EP001 分镜\n",
+                "# EP001 分镜\n\n- 未拍场次:EP001-SC090（理由：与 SC002 重复:同一个动作）\n",
+            )
+
+            self.assertEqual(creator_markdown_check.validate_episode(episode, project), [])
 
     def test_a_season_scoped_scene_id_still_resolves(self) -> None:
         """`EP001-SC001` is the documented shape; a scoped id is still one id."""
@@ -320,7 +399,7 @@ class CopyableDialogueTests(EpisodeFixture):
 
             errors = creator_markdown_check.validate_episode(episode, project)
             self.assertTrue(
-                any("引文不在《剧本.md》或《视觉设定.md》中" in error for error in errors),
+                any("引文在《剧本.md》《视觉设定.md》《分镜.md》里都找不到" in error for error in errors),
                 errors,
             )
 
@@ -342,6 +421,38 @@ class CopyableDialogueTests(EpisodeFixture):
                 episode / "视频提示词.md",
                 self.ORIGINAL,
                 'He says in Chinese, "明白，我一定尽最大努力" No extra hands, no text.',
+            )
+
+            self.assertEqual(creator_markdown_check.validate_episode(episode, project), [])
+
+    def test_a_hard_wrapped_line_does_not_escape_the_check(self) -> None:
+        """A quote that wraps is the same quote; the body is one prompt."""
+        with tempfile.TemporaryDirectory() as directory:
+            project, episode = self.episode(directory)
+            self.edit(
+                episode / "视频提示词.md",
+                self.ORIGINAL,
+                'He says in Chinese, "这条台词剧本\n> 里根本没有写过。" No extra hands.',
+            )
+
+            errors = creator_markdown_check.validate_episode(episode, project)
+            self.assertTrue(
+                any("里都找不到" in error for error in errors), errors
+            )
+
+    def test_on_screen_text_the_storyboard_designed_is_accepted(self) -> None:
+        """分镜.md is an accepted upstream document, so its own text counts."""
+        with tempfile.TemporaryDirectory() as directory:
+            project, episode = self.episode(directory)
+            self.edit(
+                episode / "分镜.md",
+                "- 声音：办公室底噪；江晨一句 VO。",
+                "- 声音：办公室底噪；江晨一句 VO。屏幕显示「本月新增粉丝零」。",
+            )
+            self.edit(
+                episode / "视频提示词.md",
+                self.ORIGINAL,
+                'The screen reads "本月新增粉丝零". No extra hands, no text.',
             )
 
             self.assertEqual(creator_markdown_check.validate_episode(episode, project), [])
