@@ -91,6 +91,11 @@ REF-STUDY-PLATE（顺序：3；用途：地理）    -> <Picture 3>
 把上面的 `REF-` 换成 `PLAN-`，定位符换成 `SHOT-...` 或 `IMG-...`，正文一个字都不用改。
 创作者按 `顺序` 在生成界面里挂图，`<Picture N>` 就对得上。
 
+`PLAN-...` 的图套件没有看过，所以 `subject_definitions` 和 `retention_analysis` 写的是
+**这张图按它的 `用途` 必须保留什么**，事实取自《视觉设定.md》和本镜冻结关键帧，而不是对像素的观察结论。
+两种槽位的句式相同：`用途` 决定保留什么，本来就不是看图看出来的。不要因为图没进项目就改写成
+「未验证」或省略保留强度——那会让执行端收不到本镜真正的保留要求。
+
 `subject_definitions` 把每个主体绑到它的标签上，句式为
 `<Subject 1> is the ... in <Picture 2>, with ...`；`retention_analysis` 逐条写保留强度和出现的镜次，
 视觉素材用 `fully_preserved`、`partially_preserved`、`attribute_transfer`、`weak_reference`，
