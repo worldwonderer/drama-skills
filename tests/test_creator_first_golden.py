@@ -1554,7 +1554,7 @@ class CreatorFirstGoldenTests(unittest.TestCase):
                 *(f"CON-{number:02d}" for number in range(1, 8)),
             },
             "short-drama-video-prompts": {
-                *(f"VID-{number:02d}" for number in range(1, 25)),
+                *(f"VID-{number:02d}" for number in range(1, 26)),
                 *(f"CON-{number:02d}" for number in range(1, 8)),
             },
             "short-drama-review": {*(f"REV-{number:02d}" for number in range(1, 12))},

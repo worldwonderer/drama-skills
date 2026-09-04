@@ -1,7 +1,12 @@
 # 视频提示词阶段契约
 
 本阶段只拥有 `剧集/<EP>/视频提示词.md` 中的 `MOTION-...` 项与按需的时间线音乐章节。它继承镜头
-起点、终点、时长、对白和冻结帧，不回写分镜或视觉设定。
+起点、终点、时长、对白和冻结帧，不回写分镜或视觉设定：镜头边界、职责、起终状态和关键帧正文都不在
+本阶段手里。
+
+唯一的例外是参考准备。SKILL 工作流第 2、3 步要求在同一请求内刷新受影响镜头的「输入参考图」
+（必要时一并回填「视觉依据」），那是**分镜 owner 在本请求内的动作**，按分镜阶段的字段规则执行，
+不是本阶段改写分镜的授权。它只更新这两条依据字段，不动镜头边界、职责、起终状态或关键帧正文。
 
 每项正文只描述从当前冻结起点到终点的变化；多镜打包、补拍或替代关系确有需要时，也写在同一文档
 的可读章节中，不建立 motion spec、container、readiness、QA 或接受记录。
@@ -35,7 +40,8 @@
 | VID-21 | craft_default | When the project's accepted production profile has generated imagery carry the frame, actions are written as high-frequency, whole-body or single-limb movements common in everyday footage; precise interception, invisible internal states, negative actions, and three-or-more-step two-handed choreography are rewritten into equivalent common-action combinations, with the dramatic information carried by combination and timing. The rule is inactive for live action or an undeclared profile, and a rewrite may never change accepted shot boundaries, terminal states, or screenplay fact. |
 | VID-22 | reviewed_invariant | Copyable text carries only what will be filmed. IDs, workflow status, hashes, file paths and craft notes stay outside the prompt; negative action intent is rewritten as a visible positive state. Unless explicitly authored, the copyable prompt directly prohibits non-diegetic subtitles, captions and dialogue-text overlays at every moment rather than naming an abstract empty layer; this never erases an exact-readable in-scene text obligation, which stays a closed allow-list of exact glyph, language, carrier and placement. A prompt that only recites constraints renders as nothing. |
 | VID-23 | reviewed_invariant | When the target model is declared to generate audio in the same pass, the copyable body treats all allowed dialogue, VO, OS, non-verbal vocalization, SFX, ambience and silence as a closed event set. Each spoken event keeps its source, speaker, spoken language and verbatim text boundary; gaps return to declared ambience or silence instead of leaving an undefined vocal channel for the execution end to fill. |
-| VID-24 | structural_invariant | An image-to-video shot carries the storyboard's REF slots unchanged, each with its 用途, so the motion document itself answers which start frame and which identity, geography, and prop pictures this shot sends. The reference mode — first frame, first and last frame, or multi-slot reference — is read from that 用途 combination and translated by the matched model dialect; where a model makes frame and reference conditioning mutually exclusive, the start frame joins the reference group rather than splitting the request. |
+| VID-24 | structural_invariant | An image-to-video shot carries the storyboard's `REF-...` and `PLAN-...` slots unchanged, each with its 用途, so the motion document itself answers which start frame and which identity, geography, and prop pictures this shot sends — and, for `PLAN-...`, in which order the creator attaches them. The reference mode — first frame, first and last frame, or multi-slot reference — is read from that 用途 combination and translated by the matched model dialect; where a model makes frame and reference conditioning mutually exclusive, the start frame joins the reference group rather than splitting the request. |
+| VID-25 | structural_invariant | Quoted Chinese in a copyable body is delivered, not authored. Every run of four or more Han characters inside a `<d>` tag or quotation marks resolves, ignoring punctuation and spacing, to text that already exists in `剧本.md`, `视觉设定.md` or `分镜.md`. A line the shot wishes the character had said belongs upstream in the screenplay, not in the prompt. Runs of three characters or fewer are in-frame labels and interjections far more often than lines, so they stay with review rather than the mechanical check. |
 
 ### `CON`
 
