@@ -806,6 +806,10 @@ def _contains_ref_token(value: str) -> bool:
     return "ref-" in value.casefold()
 
 
+def _contains_plan_token(value: str) -> bool:
+    return "plan-" in value.casefold()
+
+
 def _markdown_reference_bindings(
     section: str, *, field_name: str
 ) -> list[dict[str, Any]]:
@@ -829,6 +833,14 @@ def _markdown_reference_bindings(
         and re.fullmatch(r"无(?:外部参考)?(?:；[^\n]*)?。?", value)
     ):
         return []
+    # A `PLAN-...` slot is a picture the creator attaches in their own tool, so
+    # this suite has no file to send. Saying that plainly beats a generic syntax
+    # complaint about a declaration that is correctly written for its purpose.
+    if _contains_plan_token(value):
+        raise ValueError(
+            "source entry declares creator-supplied references (PLAN-...); "
+            "bind the real files as REF-... before producing"
+        )
     matches = list(REFERENCE_LINE_RE.finditer(value))
     if not matches:
         raise ValueError("source entry input-reference declaration is invalid")
