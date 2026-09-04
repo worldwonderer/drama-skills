@@ -198,8 +198,13 @@ def _contains_slot_token(value: str) -> bool:
 
 
 def _is_none(value: str) -> bool:
+    # `[^）]+` would stop at the first closing bracket, so a gap list that names
+    # an entry in brackets -- 「江晨人物图（IMG-...）」 -- fell through to the REF
+    # syntax error, whose obvious repair is deleting the gap record. That is the
+    # silent downgrade this contract exists to prevent, so the note takes any
+    # content as long as it is bracketed.
     return not _contains_slot_token(value) and bool(
-        re.fullmatch(r"无(?:（[^）]+）)?", _plain(value))
+        re.fullmatch(r"无(?:（.+）)?", _plain(value), re.DOTALL)
     )
 
 

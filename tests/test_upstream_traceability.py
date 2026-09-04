@@ -111,6 +111,31 @@ class CreatorSuppliedReferenceTests(EpisodeFixture):
                 any("仍有待补参考图" in error for error in errors), errors
             )
 
+    def test_a_gap_list_may_name_an_entry_in_brackets(self) -> None:
+        """A live run wrote 「江晨人物图（IMG-...）」 and got a REF-syntax error.
+
+        Its obvious repair is deleting the gap clause, which restores the silent
+        text-to-video downgrade the contract exists to prevent.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            project, episode = self.episode(directory)
+            gap = "无（待补参考图：江晨人物图（IMG-JIANGCHEN-SHEET）、本镜起始帧）"
+            for name in ("分镜.md", "视频提示词.md"):
+                self.edit(
+                    episode / name,
+                    f"- 输入参考图：{EXPLICIT_TEXT_TO_VIDEO}",
+                    f"- 输入参考图：{gap}",
+                )
+
+            errors = creator_markdown_check.validate_episode(episode, project)
+            self.assertTrue(
+                any("仍有待补参考图" in error for error in errors), errors
+            )
+            self.assertFalse(
+                any("完整 REF 语法" in error for error in errors),
+                "the gap list is prose, not a malformed slot",
+            )
+
     def test_a_plan_slot_must_locate_an_entry_that_exists(self) -> None:
         cases = {
             "missing image board": (
