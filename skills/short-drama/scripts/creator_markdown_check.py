@@ -65,15 +65,23 @@ REF_PURPOSES = (
     "结束帧",
     "风格",
 )
-SCENE_HEADING_RE = re.compile(r"^## ([A-Za-z0-9]+-SC[0-9]+)\b", re.MULTILINE)
-SCENE_ID_RE = re.compile(r"[A-Za-z0-9]+-SC[0-9]+")
+# `EP001-SC001` is the documented shape, but a project that scopes ids by season
+# writes `S01-EP001-SC001`. Both are one stable scene id, so the pattern takes
+# any hyphenated prefix rather than exactly one segment.
+SCENE_ID_PATTERN = r"(?:[A-Za-z0-9]+-)+SC[0-9]+"
+SCENE_HEADING_RE = re.compile(
+    r"^## (" + SCENE_ID_PATTERN + r")\b", re.MULTILINE
+)
+SCENE_ID_RE = re.compile(SCENE_ID_PATTERN)
 # A scene the storyboard decided not to film. SHT-01 has always allowed the
 # omission and always required a reason; without a place to write it the
 # omission and an oversight look identical in the finished document.
 UNFILMED_LINE_RE = re.compile(
     r"^[ \t\u3000]*[-*+][ \t\u3000]*未拍场次[：:].*$", re.MULTILINE
 )
-UNFILMED_ENTRY_RE = re.compile(r"([A-Za-z0-9]+-SC[0-9]+)（理由：([^）\n]+)）")
+UNFILMED_ENTRY_RE = re.compile(
+    r"(" + SCENE_ID_PATTERN + r")（理由：([^）\n]+)）"
+)
 # Dialogue reaches the model as a quoted run, either inside the H3 `<d>` tag or
 # inside quotation marks. Runs shorter than four Han characters are in-frame
 # labels and interjections far more often than they are lines, so the check
@@ -902,7 +910,7 @@ def _shot_sources(
     for token in tokens:
         # 《镜头手艺》 asks for the scene id plus a short quote of the source
         # line, so only the head of each entry is the id; the rest is the quote.
-        leading = re.match(r"[A-Za-z0-9]+-SC[0-9]+", token)
+        leading = SCENE_ID_RE.match(token)
         if leading is None:
             errors.append(
                 f"{owner}: 来源必须以《剧本.md》的场景 ID 开头: {_excerpt(token, 24)}"

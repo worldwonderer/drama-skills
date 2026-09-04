@@ -198,6 +198,19 @@ class StoryboardFollowsTheScreenplayTests(EpisodeFixture):
             errors = creator_markdown_check.validate_episode(episode, project)
             self.assertTrue(any("缺少来源字段" in error for error in errors), errors)
 
+    def test_a_season_scoped_scene_id_still_resolves(self) -> None:
+        """`EP001-SC001` is the documented shape; a scoped id is still one id."""
+        with tempfile.TemporaryDirectory() as directory:
+            project, episode = self.episode(directory)
+            for name in ("剧本.md", "分镜.md"):
+                path = episode / name
+                path.write_text(
+                    path.read_text(encoding="utf-8").replace("EP001-SC", "S01-EP001-SC"),
+                    encoding="utf-8",
+                )
+
+            self.assertEqual(creator_markdown_check.validate_episode(episode, project), [])
+
     def test_a_scene_nobody_films_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             project, episode = self.episode(directory)
