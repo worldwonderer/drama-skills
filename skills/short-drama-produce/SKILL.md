@@ -113,7 +113,7 @@ adapter 配置必须在项目外，只包含 argv 命令和超时；凭据由 ad
 引用语义说明（中文名、用途、允许控制与不得控制范围）；不会把槽位名误当成要渲染进画面的文字。
 外部 adapter 也必须保留这组语义或明确拒绝，不能只上传文件而静默丢失控制边界。
 
-本技能可选提供四个 stdlib adapter，均通过项目外 adapter config 选择，凭据只从运行环境读取：
+本技能可选提供五个 stdlib adapter，均通过项目外 adapter config 选择，凭据只从运行环境读取：
 
 - [Seedance](references/providers/seedance.md)：模型/Endpoint ID 必须由账号显式配置；compiler 支持
   官方图片、视频和音频参考 role，内置 runtime 未配置可信上传时仍拒绝本地参考文件。
@@ -124,6 +124,11 @@ adapter 配置必须在项目外，只包含 argv 命令和超时；凭据由 ad
 - [MiniMax H3 视频](references/providers/minimax-h3-video.md)：模型 ID、分辨率集合与时长区间必须
   由账号显式配置；提示词进 `content` 的 text 项，参考图按显式 role 绑定，本地参考在没有可信上传时
   fail closed。该模型与画面同一次生成声音，写法影响见视频提示词技能的目标模型能力档案。
+
+- [Atlas Cloud](references/providers/atlas.md)：同一个 submit/poll 形状同时覆盖图片与视频；模型 ID
+  必须由账号显式配置（ID 本身就选定了任务），时长区间同样必须显式配置。参考图只走 `images` 单字段、
+  没有 per-reference role，因此只接受 `first_frame`/`reference_image` 且 `first_frame` 必须在首位，
+  绑定参考视频/音频时 fail closed。图片容器与尺寸随模型而异，产出后缀对不上会在下载后 fail closed。
 
 这些 adapter 是已验证请求契约，不是账号可用性或生成质量保证；正式生产仍必须通过上面的本次
 确认闸门，并由审查 Skill 判断产物质量。
