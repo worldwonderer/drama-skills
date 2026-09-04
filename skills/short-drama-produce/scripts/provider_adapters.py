@@ -33,6 +33,26 @@ OPENAI_BASE_URL = "https://api.openai.com/v1"
 SEEDANCE_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 MINIMAX_VIDEO_BASE_URL = "https://api.minimax.io/v2"
+ATLAS_BASE_URL = "https://api.atlascloud.ai/api/v1/model"
+# api.atlascloud.ai answers the stdlib default User-Agent with 403 (error code
+# 1010), so this adapter always sends an explicit one. The provider result CDN
+# accepts the default agent, which is why only the JSON calls override it.
+ATLAS_USER_AGENT = "drama-skills-produce/1"
+ATLAS_ENDPOINTS = {"image": "generateImage", "video": "generateVideo"}
+ATLAS_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+ATLAS_SHOT_TYPES = frozenset({"single", "multi"})
+# Atlas takes an explicit `width*height`; the asterisk form is mandatory.
+ATLAS_SIZE_RE = re.compile(r"\A[1-9][0-9]{1,4}\*[1-9][0-9]{1,4}\Z")
+# Every Atlas reference travels in the single `images` field, so only image
+# roles can be honoured; the task is selected by the configured model id.
+ATLAS_REFERENCE_ROLES = {
+    "first_frame": "image_url",
+    "reference_image": "image_url",
+}
+ATLAS_TERMINAL_SUCCESS = "completed"
+ATLAS_PENDING_STATUSES = frozenset(
+    {"processing", "queued", "pending", "running", "in_progress", "starting"}
+)
 MAX_JSON_RESPONSE = 128 * 1024 * 1024
 MAX_OUTPUT_BYTES = 512 * 1024 * 1024
 MAX_REFERENCE_BYTES = 50 * 1024 * 1024
@@ -654,6 +674,145 @@ def _minimax_video_runtime_profile() -> tuple[
     return allowed_ratios, allowed_resolutions, duration_range
 
 
+def compile_atlas_payload(
+    job: Mapping[str, Any],
+    *,
+    model: str,
+    modality: str,
+    reference_urls: Sequence[str] = (),
+    reference_roles: Sequence[str] = (),
+    duration_range: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    """Compile an image or video job into an Atlas Cloud generation body.
+
+    ``model`` is deliberately mandatory: the Atlas model id also selects the
+    task (``.../text-to-video`` versus ``.../image-to-video``), so it must come
+    from explicit runtime configuration rather than being inferred here.
+    """
+    if modality not in ATLAS_ENDPOINTS:
+        raise ValueError("Atlas adapter supports only image or video jobs")
+    prompt, parameters = _require_job(job, modality)
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("Atlas model must be explicitly configured")
+    references = job.get("references", [])
+    if not isinstance(references, list) or len(reference_urls) != len(references):
+        raise ValueError("Atlas reference URLs must match job references")
+    if len(reference_roles) != len(reference_urls):
+        raise ValueError("Atlas reference roles must match job references")
+    suffix = Path(job["outputs"][0]).suffix.casefold()
+    if modality == "video":
+        if suffix != ".mp4":
+            raise ValueError("Atlas video adapter requires an MP4 target")
+        allowed = {"size", "duration", "shot_type", "generate_audio", "prompt_language"}
+    else:
+        if suffix not in ATLAS_IMAGE_SUFFIXES:
+            raise ValueError("Atlas image adapter requires a PNG, JPEG or WebP target")
+        allowed = {"size", "prompt_language"}
+    parameters = _take(parameters, allowed)
+    prompt_language = _pop_prompt_language(parameters)
+    size = parameters.get("size")
+    if size is not None and (
+        not isinstance(size, str) or ATLAS_SIZE_RE.fullmatch(size) is None
+    ):
+        raise ValueError("Atlas size must be width*height, such as 1920*1080")
+    duration = parameters.get("duration")
+    if duration is not None:
+        if not isinstance(duration, int) or isinstance(duration, bool):
+            raise ValueError("Atlas duration must be an integer number of seconds")
+        if duration_range is None:
+            raise ValueError("Atlas duration needs an explicit model profile")
+        minimum, maximum = duration_range
+        if not 1 <= minimum <= maximum <= 60 or not minimum <= duration <= maximum:
+            raise ValueError("Atlas duration is outside the configured model profile")
+    shot_type = parameters.get("shot_type")
+    if shot_type is not None and (
+        not isinstance(shot_type, str) or shot_type not in ATLAS_SHOT_TYPES
+    ):
+        # An empty shot_type is rejected by the API, so it is never forwarded.
+        raise ValueError("Atlas shot_type must be single or multi")
+    generate_audio = parameters.get("generate_audio")
+    if generate_audio is not None and not isinstance(generate_audio, bool):
+        raise ValueError("Atlas generate_audio must be a boolean")
+
+    reference_tokens: list[str] = []
+    for index, role in enumerate(reference_roles, 1):
+        if role not in ATLAS_REFERENCE_ROLES:
+            raise ValueError(f"unsupported Atlas reference role: {role}")
+        if role == "first_frame" and index != 1:
+            # Atlas has no per-reference role field: the first entry of `images`
+            # is the opening frame, so a later first_frame cannot be honoured.
+            raise ValueError("Atlas requires the first_frame reference to be first")
+        reference_tokens.append(f"@图片{index}")
+    if reference_roles and modality == "image":
+        raise ValueError("Atlas image adapter does not accept references")
+
+    text = _prompt_with_reference_contract(
+        prompt,
+        job,
+        prompt_language=prompt_language,
+        reference_tokens=reference_tokens,
+    )
+    body: dict[str, Any] = {"model": model.strip(), "prompt": text}
+    if size is not None:
+        body["size"] = size
+    if duration is not None:
+        body["duration"] = duration
+    if shot_type is not None:
+        body["shot_type"] = shot_type
+    if generate_audio is not None:
+        body["generate_audio"] = generate_audio
+    if reference_urls:
+        for index, url in enumerate(reference_urls):
+            if not isinstance(url, str) or not url:
+                raise ValueError("Atlas reference URL must be non-empty")
+            if Path(str(references[index])).suffix.casefold() not in ATLAS_IMAGE_SUFFIXES:
+                raise ValueError("Atlas references must be PNG, JPEG or WebP images")
+            parsed = urllib.parse.urlparse(url)
+            if not (
+                (parsed.scheme == "https" and parsed.netloc)
+                or (
+                    parsed.scheme == "asset"
+                    and parsed.netloc.startswith("asset-")
+                    and not parsed.path
+                )
+                or _is_inline_reference(url)
+            ):
+                raise ValueError(
+                    "Atlas reference URL must be HTTPS, asset:// or a base64 data URI"
+                )
+        # Atlas takes every input image in one newline-separated field.
+        body["images"] = "\n".join(reference_urls)
+    return body
+
+
+def _atlas_runtime_profile() -> tuple[int, int] | None:
+    minimum_raw = os.environ.get("ATLASCLOUD_MIN_DURATION")
+    maximum_raw = os.environ.get("ATLASCLOUD_MAX_DURATION")
+    if (minimum_raw is None) != (maximum_raw is None):
+        raise AdapterFailure(
+            "Atlas duration profile is incomplete",
+            category="configuration",
+            code="invalid_model_profile",
+        )
+    if minimum_raw is None or maximum_raw is None:
+        return None
+    try:
+        duration_range = (int(minimum_raw), int(maximum_raw))
+    except ValueError as exc:
+        raise AdapterFailure(
+            "Atlas duration profile is invalid",
+            category="configuration",
+            code="invalid_model_profile",
+        ) from exc
+    if not 1 <= duration_range[0] <= duration_range[1] <= 60:
+        raise AdapterFailure(
+            "Atlas duration profile is invalid",
+            category="configuration",
+            code="invalid_model_profile",
+        )
+    return duration_range
+
+
 def compile_gpt_image_2_payload(job: Mapping[str, Any]) -> dict[str, Any]:
     """Compile an image job into GPT Image 2 generation/edit fields."""
     prompt, parameters = _require_job(job, "image")
@@ -818,12 +977,15 @@ def _request_json(
     method: str = "POST",
     body: Mapping[str, Any] | None = None,
     token: str,
+    headers: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, Any], Mapping[str, str]]:
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(url, data=data, method=method)
     request.add_header("Authorization", f"Bearer {token}")
     if body is not None:
         request.add_header("Content-Type", "application/json")
+    for name, value in (headers or {}).items():
+        request.add_header(name, value)
     try:
         with urllib.request.urlopen(request, timeout=180) as response:
             raw = response.read(MAX_JSON_RESPONSE + 1)
@@ -1219,6 +1381,103 @@ def _run_seedance(job: Mapping[str, Any]) -> tuple[Path, str]:
     )
 
 
+def _run_atlas(job: Mapping[str, Any]) -> tuple[Path, str]:
+    token = _credential("ATLASCLOUD_API_KEY")
+    model = os.environ.get("ATLASCLOUD_MODEL", "")
+    modality = job.get("modality") if isinstance(job, Mapping) else None
+    if modality not in ATLAS_ENDPOINTS:
+        raise ValueError("Atlas adapter supports only image or video jobs")
+    references = _reference_paths(job)
+    reference_roles = (
+        _binding_roles(job, allowed=ATLAS_REFERENCE_ROLES, provider="Atlas")
+        if references
+        else []
+    )
+    reference_urls = _inline_reference_urls(
+        references, reference_roles, allowed=ATLAS_REFERENCE_ROLES, provider="Atlas"
+    )
+    body = compile_atlas_payload(
+        job,
+        model=model,
+        modality=modality,
+        reference_urls=reference_urls,
+        reference_roles=reference_roles,
+        duration_range=_atlas_runtime_profile(),
+    )
+    base = _base_url("ATLASCLOUD_BASE_URL", ATLAS_BASE_URL)
+    agent = {"User-Agent": ATLAS_USER_AGENT}
+    created, _ = _request_json(
+        f"{base}/{ATLAS_ENDPOINTS[modality]}",
+        provider="atlas",
+        body=body,
+        token=token,
+        headers=agent,
+    )
+    data = created.get("data")
+    prediction_id = data.get("id") if isinstance(data, Mapping) else None
+    if not isinstance(prediction_id, str) or not prediction_id:
+        raise AdapterFailure(
+            "Atlas did not return a prediction id", code="missing_task_id"
+        )
+    try:
+        interval = float(os.environ.get("ATLASCLOUD_POLL_INTERVAL", "6"))
+        deadline = time.monotonic() + float(
+            os.environ.get("ATLASCLOUD_TIMEOUT_SECONDS", "1800")
+        )
+    except ValueError as exc:
+        raise AdapterFailure("Atlas polling configuration is invalid") from exc
+    if interval <= 0 or deadline <= time.monotonic():
+        raise AdapterFailure("Atlas polling configuration is invalid")
+    while time.monotonic() < deadline:
+        time.sleep(interval)
+        status_doc, _ = _request_json(
+            f"{base}/prediction/{urllib.parse.quote(prediction_id, safe='')}",
+            provider="atlas",
+            method="GET",
+            token=token,
+            headers=agent,
+        )
+        payload = status_doc.get("data")
+        payload = payload if isinstance(payload, Mapping) else {}
+        status = payload.get("status")
+        if status == ATLAS_TERMINAL_SUCCESS:
+            outputs = payload.get("outputs")
+            url = outputs[0] if isinstance(outputs, list) and outputs else None
+            if not isinstance(url, str):
+                raise AdapterFailure(
+                    "Atlas completed without an output URL",
+                    code="missing_output_url",
+                    request_id=prediction_id,
+                )
+            return _download(
+                job,
+                url,
+                job["outputs"][0],
+                provider="atlas",
+            ), prediction_id
+        if isinstance(status, str) and (
+            status.casefold() in TERMINAL_FAILURES or status.casefold() == "failed"
+        ):
+            raise AdapterFailure(
+                "Atlas prediction failed",
+                code="task_" + status.casefold(),
+                request_id=prediction_id,
+            )
+        if not isinstance(status, str) or status.casefold() not in ATLAS_PENDING_STATUSES:
+            raise AdapterFailure(
+                "Atlas returned an unknown prediction status",
+                code="unknown_task_status",
+                request_id=prediction_id,
+            )
+    raise AdapterFailure(
+        "Atlas prediction polling timed out",
+        category="timeout",
+        code="task_poll_timeout",
+        request_id=prediction_id,
+        retryable=True,
+    )
+
+
 def _run_openai(job: Mapping[str, Any]) -> tuple[Path, str | None]:
     token = _credential("OPENAI_API_KEY")
     body = compile_gpt_image_2_payload(job)
@@ -1463,6 +1722,83 @@ def _selftest() -> None:
         pass
     else:
         raise AssertionError("MiniMax text-to-video without a ratio was accepted")
+    atlas_video = compile_atlas_payload(
+        {
+            **video,
+            "parameters": {"duration": 5, "size": "1080*1920", "shot_type": "multi"},
+        },
+        model="bytedance/seedance-2.0/text-to-video",
+        modality="video",
+        duration_range=(4, 15),
+    )
+    if atlas_video["model"] != "bytedance/seedance-2.0/text-to-video":
+        raise RuntimeError("Atlas model self-test failed")
+    if atlas_video.get("size") != "1080*1920" or atlas_video.get("shot_type") != "multi":
+        raise RuntimeError("Atlas parameter self-test failed")
+    if "images" in atlas_video:
+        raise RuntimeError("Atlas text-to-video must not carry an images field")
+    atlas_image = compile_atlas_payload(
+        {**image, "parameters": {"size": "1024*1536"}},
+        model="google/nano-banana-pro/text-to-image",
+        modality="image",
+    )
+    if atlas_image.get("size") != "1024*1536" or "duration" in atlas_image:
+        raise RuntimeError("Atlas image self-test failed")
+    atlas_reference = compile_atlas_payload(
+        {
+            **video,
+            "references": ["设定/keyframe.png"],
+            "reference_bindings": [
+                {
+                    "order": 1,
+                    "path": "设定/keyframe.png",
+                    "label": "起始帧",
+                    "role": "first_frame",
+                    "may_control": ["构图"],
+                    "must_not_control": ["台词"],
+                }
+            ],
+            "parameters": {"duration": 5, "prompt_language": "zh"},
+        },
+        model="bytedance/seedance-2.0/image-to-video",
+        modality="video",
+        reference_urls=["asset://asset-example-keyframe"],
+        reference_roles=["first_frame"],
+        duration_range=(4, 15),
+    )
+    if atlas_reference["images"] != "asset://asset-example-keyframe":
+        raise RuntimeError("Atlas reference self-test failed")
+    if "@图片1" not in atlas_reference["prompt"]:
+        raise RuntimeError("Atlas reference contract self-test failed")
+    for invalid_atlas, note in (
+        ({**video, "parameters": {"size": "1920x1080"}}, "size with an x separator"),
+        ({**video, "parameters": {"shot_type": ""}}, "an empty shot_type"),
+        ({**video, "parameters": {"duration": 5}}, "duration without a model profile"),
+        ({**video, "parameters": {"resolution": "768P"}}, "an unsupported parameter"),
+    ):
+        try:
+            compile_atlas_payload(
+                invalid_atlas,
+                model="bytedance/seedance-2.0/text-to-video",
+                modality="video",
+                duration_range=(4, 15) if "duration" not in invalid_atlas["parameters"] else None,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Atlas payload with {note} was accepted")
+    try:
+        compile_atlas_payload(
+            {**image, "parameters": {}},
+            model="google/nano-banana-pro/text-to-image",
+            modality="image",
+            reference_urls=["asset://asset-example-still"],
+            reference_roles=["reference_image"],
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Atlas image payload with a reference was accepted")
     compiled_music = compile_minimax_music_payload(music)
     if compiled_music["model"] != MINIMAX_MUSIC_MODEL:
         raise RuntimeError("MiniMax model self-test failed")
@@ -1498,7 +1834,7 @@ def main() -> int:
     parser.add_argument(
         "provider",
         nargs="?",
-        choices=("seedance", "gpt-image-2", "minimax-music", "minimax-h3"),
+        choices=("seedance", "gpt-image-2", "minimax-music", "minimax-h3", "atlas"),
     )
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
@@ -1516,6 +1852,7 @@ def main() -> int:
             "gpt-image-2": _run_openai,
             "minimax-music": _run_minimax,
             "minimax-h3": _run_minimax_video,
+            "atlas": _run_atlas,
         }
         path, provider_job_id = runners[args.provider](job)
         response: dict[str, Any] = {

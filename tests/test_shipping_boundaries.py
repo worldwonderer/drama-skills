@@ -17,6 +17,7 @@ ALLOWED_PROVIDER_URLS = {
         "https://ark.cn-beijing.volces.com/api/v3",
         "https://api.minimax.io/v1",
         "https://api.minimax.io/v2",
+        "https://api.atlascloud.ai/api/v1/model",
     },
     "skills/short-drama-produce/references/providers/seedance.md": {
         "https://ark.cn-beijing.volces.com/api/v3",
@@ -35,6 +36,11 @@ ALLOWED_PROVIDER_URLS = {
     "skills/short-drama-produce/references/providers/minimax-h3-video.md": {
         "https://api.minimax.io/v2",
         "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+    },
+    "skills/short-drama-produce/references/providers/atlas.md": {
+        "https://api.atlascloud.ai/api/v1/model",
+        "https://www.atlascloud.ai/docs",
+        "https://www.atlascloud.ai/models",
     },
 }
 RELEASE_TEXT_SUFFIXES = {

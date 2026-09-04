@@ -317,6 +317,118 @@ class ProviderCompilerTests(unittest.TestCase):
                     self.image_job(**parameters)
                 )
 
+    def test_atlas_payload_uses_the_asterisk_size_and_configured_task(self) -> None:
+        compiled = provider_adapters.compile_atlas_payload(
+            self.video_job(size="1080*1920", duration=5, shot_type="multi", generate_audio=False),
+            model="bytedance/seedance-2.0/text-to-video",
+            modality="video",
+            duration_range=(4, 15),
+        )
+        self.assertEqual(compiled["model"], "bytedance/seedance-2.0/text-to-video")
+        self.assertEqual(compiled["size"], "1080*1920")
+        self.assertEqual(compiled["shot_type"], "multi")
+        self.assertIs(compiled["generate_audio"], False)
+        # Atlas has no ratio/resolution fields, and text-to-video carries no images.
+        self.assertNotIn("ratio", compiled)
+        self.assertNotIn("images", compiled)
+
+    def test_atlas_image_job_keeps_only_the_image_envelope(self) -> None:
+        compiled = provider_adapters.compile_atlas_payload(
+            self.image_job(size="1024*1536"),
+            model="bytedance/seedream-v4",
+            modality="image",
+        )
+        self.assertEqual(compiled["size"], "1024*1536")
+        for field in ("duration", "shot_type", "generate_audio", "images"):
+            self.assertNotIn(field, compiled)
+
+    def test_atlas_fails_closed_on_unproven_or_unsafe_inputs(self) -> None:
+        cases = (
+            # The API rejects the `1920x1080` spelling outright.
+            (self.video_job(size="1920x1080"), (4, 15)),
+            # An empty shot_type is a documented provider error.
+            (self.video_job(shot_type=""), (4, 15)),
+            (self.video_job(shot_type="montage"), (4, 15)),
+            # Duration without an explicit model profile must not be guessed.
+            (self.video_job(duration=5), None),
+            (self.video_job(duration=30), (4, 15)),
+            # Seedance-shaped parameters are not Atlas parameters.
+            (self.video_job(ratio="9:16"), (4, 15)),
+            (self.video_job(resolution="768P"), (4, 15)),
+        )
+        for job, duration_range in cases:
+            with self.subTest(parameters=job["parameters"]):
+                with self.assertRaises(ValueError):
+                    provider_adapters.compile_atlas_payload(
+                        job,
+                        model="bytedance/seedance-2.0/text-to-video",
+                        modality="video",
+                        duration_range=duration_range,
+                    )
+
+    def test_atlas_references_travel_in_one_ordered_images_field(self) -> None:
+        binding = {**self.reference_binding(), "role": "first_frame"}
+        job = {
+            **self.video_job(duration=5, prompt_language="zh"),
+            "references": [binding["path"]],
+            "reference_bindings": [binding],
+        }
+        compiled = provider_adapters.compile_atlas_payload(
+            job,
+            model="bytedance/seedance-2.0/image-to-video",
+            modality="video",
+            reference_urls=["asset://asset-hero-keyframe"],
+            reference_roles=["first_frame"],
+            duration_range=(4, 15),
+        )
+        self.assertEqual(compiled["images"], "asset://asset-hero-keyframe")
+        self.assertIn("@图片1", compiled["prompt"])
+        self.assertIn(binding["label"], compiled["prompt"])
+
+    def test_atlas_refuses_roles_the_request_shape_cannot_express(self) -> None:
+        first_binding = {**self.reference_binding(), "role": "reference_image"}
+        second_binding = {
+            **self.reference_binding(),
+            "order": 2,
+            "path": "输入/keyframe.png",
+            "role": "first_frame",
+        }
+        # `images` has no per-entry role field: the opening frame is the first
+        # entry, so a later first_frame cannot be honoured.
+        misordered = {
+            **self.video_job(duration=5),
+            "references": [first_binding["path"], second_binding["path"]],
+            "reference_bindings": [first_binding, second_binding],
+        }
+        with self.assertRaises(ValueError):
+            provider_adapters.compile_atlas_payload(
+                misordered,
+                model="bytedance/seedance-2.0/image-to-video",
+                modality="video",
+                reference_urls=[
+                    "asset://asset-hero-still",
+                    "asset://asset-hero-keyframe",
+                ],
+                reference_roles=["reference_image", "first_frame"],
+                duration_range=(4, 15),
+            )
+        # Reference video and audio have no place in the Atlas request shape.
+        with self.assertRaises(ValueError):
+            provider_adapters.compile_atlas_payload(
+                {
+                    **self.video_job(duration=5),
+                    "references": ["输入/clip.mp4"],
+                    "reference_bindings": [
+                        {**self.reference_binding(), "path": "输入/clip.mp4", "role": "reference_video"}
+                    ],
+                },
+                model="bytedance/seedance-2.0/reference-to-video",
+                modality="video",
+                reference_urls=["asset://asset-hero-clip"],
+                reference_roles=["reference_video"],
+                duration_range=(4, 15),
+            )
+
     def test_minimax_music_payload_is_music_3_and_never_invents_duration(self) -> None:
         payload = provider_adapters.compile_minimax_music_payload(
             self.music_job(is_instrumental=True)
@@ -715,6 +827,84 @@ class ProviderRuntimeTests(unittest.TestCase):
                 self.assertEqual(
                     raised.exception.public("minimax-h3")["code"], "unknown_task_status"
                 )
+
+    def test_atlas_runtime_polls_prediction_and_sends_an_explicit_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = {
+                "ATLASCLOUD_API_KEY": "atlas-secret",
+                "ATLASCLOUD_MODEL": "bytedance/seedance-2.0/text-to-video",
+            }
+            calls: list[dict[str, object]] = []
+
+            def fake_request_json(url, **kwargs):
+                calls.append({"url": url, **kwargs})
+                if url.endswith("/generateVideo"):
+                    return {"data": {"id": "atlas-prediction", "status": "processing"}}, {}
+                return (
+                    {
+                        "data": {
+                            "status": "completed",
+                            "outputs": ["https://cdn.example/shot.mp4"],
+                        }
+                    },
+                    {},
+                )
+
+            with mock.patch.dict(os.environ, env, clear=False), mock.patch.object(
+                provider_adapters, "_request_json", side_effect=fake_request_json
+            ), mock.patch.object(
+                provider_adapters, "_download", return_value=root / "shot.mp4"
+            ), mock.patch.object(provider_adapters.time, "sleep", return_value=None):
+                path, prediction_id = provider_adapters._run_atlas(
+                    {
+                        "modality": "video",
+                        "prompt": "camera holds",
+                        "references": [],
+                        "outputs": ["制作成果/shot.mp4"],
+                        "parameters": {"size": "1080*1920", "shot_type": "single"},
+                        "project_root": str(root),
+                        "output_root": str(root),
+                    }
+                )
+        self.assertEqual(path, root / "shot.mp4")
+        self.assertEqual(prediction_id, "atlas-prediction")
+        self.assertTrue(calls[0]["url"].endswith("/generateVideo"))
+        self.assertIn("/prediction/atlas-prediction", calls[1]["url"])
+        self.assertEqual(calls[1]["method"], "GET")
+        # api.atlascloud.ai answers the stdlib default agent with 403/1010.
+        for call in calls:
+            self.assertEqual(
+                call["headers"], {"User-Agent": provider_adapters.ATLAS_USER_AGENT}
+            )
+
+    def test_atlas_runtime_fails_closed_on_an_unknown_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = {
+                "ATLASCLOUD_API_KEY": "atlas-secret",
+                "ATLASCLOUD_MODEL": "bytedance/seedance-2.0/text-to-video",
+            }
+            responses = [
+                ({"data": {"id": "atlas-prediction"}}, {}),
+                ({"data": {"status": "reticulating"}}, {}),
+            ]
+            with mock.patch.dict(os.environ, env, clear=False), mock.patch.object(
+                provider_adapters, "_request_json", side_effect=responses
+            ), mock.patch.object(provider_adapters.time, "sleep", return_value=None):
+                with self.assertRaises(provider_adapters.AdapterFailure) as caught:
+                    provider_adapters._run_atlas(
+                        {
+                            "modality": "video",
+                            "prompt": "camera holds",
+                            "references": [],
+                            "outputs": ["制作成果/shot.mp4"],
+                            "parameters": {},
+                            "project_root": str(root),
+                            "output_root": str(root),
+                        }
+                    )
+        self.assertEqual(caught.exception.public("atlas")["code"], "unknown_task_status")
 
     def test_minimax_video_runtime_refuses_an_invalid_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
